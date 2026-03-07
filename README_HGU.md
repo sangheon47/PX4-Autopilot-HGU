@@ -1,19 +1,18 @@
-# IIM42652 RT Loop for CUAV 7-Nano
+# CUAV 7-Nano용 IIM42652 RT 루프
 
-This branch contains the minimum PX4 changes required to run a direct realtime
-loop on the CUAV 7-Nano with the IIM42652 driver.
+이 브랜치는 CUAV 7-Nano에서 `IIM42652` 드라이버 기반 직접 실시간 루프를
+돌리기 위해 필요한 최소 PX4 변경만 포함합니다.
 
-## Included changes
+## 포함된 변경 사항
 
-- Enable `iim42652` on CUAV 7-Nano and disable the unused onboard IMUs.
-- Start `iim42652` from the board sensor init script at boot.
-- Disable the default `pwm_out` startup so the driver can write PWM/DSHOT
-  outputs directly.
-- Add a 200 Hz realtime loop inside `IIM42652`.
-- Split controller logic into `src/lib/rt_control/`.
-- Add UDP telemetry queueing and status reporting.
+- CUAV 7-Nano에서 `iim42652`를 활성화하고 사용하지 않는 내장 IMU를 비활성화함
+- 부팅 시 보드 센서 초기화 스크립트에서 `iim42652`를 시작함
+- 드라이버가 PWM/DSHOT 출력을 직접 쓰도록 기본 `pwm_out` 시작을 막음
+- `IIM42652` 내부에 200 Hz 실시간 루프를 추가함
+- 제어기 코드를 `src/lib/rt_control/`로 분리함
+- UDP 텔레메트리 큐와 상태 출력 기능을 추가함
 
-## Quick start
+## 빠른 시작
 
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
@@ -22,13 +21,13 @@ git switch share
 make cuav_7-nano_default
 ```
 
-Build output:
+빌드 결과물:
 
 ```bash
 build/cuav_7-nano_default/cuav_7-nano_default.px4
 ```
 
-## Files to inspect first
+## 먼저 볼 파일
 
 - `boards/cuav/7-nano/default.px4board`
 - `boards/cuav/7-nano/init/rc.board_sensors`
@@ -38,91 +37,91 @@ build/cuav_7-nano_default/cuav_7-nano_default.px4
 - `src/lib/rt_control/rt_control.c`
 - `src/lib/rt_control/rt_control.h`
 
-## Build
+## 빌드
 
 ```bash
 make cuav_7-nano_default
 ```
 
-## Flash
+## 업로드
 
-If your board is connected and PX4 upload is available:
+보드가 연결되어 있고 PX4 업로드가 가능한 환경이면:
 
 ```bash
 make cuav_7-nano_default upload
 ```
 
-Or flash the generated `.px4` file with QGroundControl.
+또는 생성된 `.px4` 파일을 QGroundControl로 업로드하면 됩니다.
 
-## Boot behavior
+## 부팅 동작
 
-At boot the board sensor script starts:
+부팅 시 보드 센서 초기화 스크립트에서 아래 명령이 실행됩니다.
 
 ```bash
 iim42652 -s -R 22 start
 ```
 
-The default `pwm_out start` in `rcS` is commented out, and DSHOT is still
-started by PX4.
+`rcS`에서는 기본 `pwm_out start`가 주석 처리되어 있고, `DSHOT`은 계속 PX4가
+시작합니다.
 
-## Realtime path
+## 실시간 루프 경로
 
-Runtime flow inside `IIM42652::ControlLoopIRQ()`:
+`IIM42652::ControlLoopIRQ()` 내부 실행 순서는 아래와 같습니다.
 
 1. `ReadSampleDirect()`
 2. `rt_controller()`
 3. `WriteStep()`
 4. `TelemetryStep()`
 
-The periodic callback is started by `StartControlLoopIRQ()` using
-`hrt_call_every()` at 200 Hz (`CONTROL_PERIOD_US = 5000`).
+주기 콜백은 `StartControlLoopIRQ()`에서 `hrt_call_every()`를 이용해
+200 Hz(`CONTROL_PERIOD_US = 5000`)로 시작합니다.
 
-## What to edit
+## 주로 수정할 곳
 
-- Controller logic: `src/lib/rt_control/rt_control.c`
-- Loop rate: `CONTROL_PERIOD_US` in `IIM42652.hpp`
-- PWM range: `PWM_MIN_US`, `PWM_MAX_US` in `IIM42652.hpp`
-- DSHOT max: `DSHOT_THROTTLE_MAX` in `IIM42652.hpp`
-- UDP destination: `InitUdpTelemetry()` in `IIM42652.cpp`
+- 제어기 로직: `src/lib/rt_control/rt_control.c`
+- 루프 주기: `IIM42652.hpp`의 `CONTROL_PERIOD_US`
+- PWM 범위: `IIM42652.hpp`의 `PWM_MIN_US`, `PWM_MAX_US`
+- DSHOT 최대값: `IIM42652.hpp`의 `DSHOT_THROTTLE_MAX`
+- UDP 목적지: `IIM42652.cpp`의 `InitUdpTelemetry()`
 
-## Output mapping
+## 출력 매핑
 
-- Servo outputs: channels 1-4
-- BLDC DSHOT outputs: channels 5-6
+- Servo 출력: 채널 1-4
+- BLDC DSHOT 출력: 채널 5-6
 
-## Check after boot
+## 부팅 후 확인
 
-From the NSH shell:
+NSH 셸에서 아래 명령으로 확인합니다.
 
 ```bash
 iim42652 status
 ```
 
-Expected status output shows:
+출력에서 보게 되는 주요 항목:
 
 - `RT period_us=5000`
-- cycle counter
-- input/control/output/exec timing
-- accel/gyro values
-- PWM and DSHOT outputs
+- cycle 카운터
+- input/control/output/exec 시간
+- 가속도/자이로 값
+- PWM/DSHOT 출력 값
 
-## Recommended branch model
+## 권장 브랜치 구조
 
-Use three short branch names:
+짧은 브랜치 이름 3개만 쓰는 것을 권장합니다.
 
-- `share`: clean reference branch for sharing and reproduction
-- `team`: integration branch used by you and your teammate
-- `local`: your personal working branch
+- `share`: 외부 공유 및 재현용 기준 브랜치
+- `team`: 팀 통합 브랜치
+- `local`: 개인 작업 브랜치
 
-If you cloned this fork directly, a simple setup is:
+이 포크를 직접 clone 했다면 기본 설정은 이렇게 시작하면 됩니다.
 
 ```bash
 git switch share
 git switch -c local
 ```
 
-If you use this repository as a local workspace with the fork configured as
-`px4fork`, a simple setup is:
+현재 저장소처럼 `px4fork` remote를 별도로 두고 쓰는 경우에는 아래처럼
+맞추면 됩니다.
 
 ```bash
 git fetch px4fork
@@ -131,15 +130,15 @@ git switch -c team px4fork/team
 git switch -c local px4fork/team
 ```
 
-Typical flow:
+기본 흐름:
 
-1. Do your own edits on `local`
-2. Merge tested changes into `team`
-3. Promote stable `team` changes into `share`
+1. `local`에서 개인 작업
+2. 테스트가 끝난 변경을 `team`에 반영
+3. 안정화된 `team`을 `share`로 승격
 
-## Teammate workflow
+## 팀원 협업 흐름
 
-Your teammate can use the same fork and the same short branch names:
+팀원도 같은 포크와 같은 짧은 브랜치 이름을 쓰면 됩니다.
 
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
@@ -148,7 +147,7 @@ git switch -c team origin/team
 git switch -c local
 ```
 
-Work on `local`, then merge into `team` when the build is good:
+팀원은 `local`에서 작업하고, 빌드가 되는 상태가 되면 `team`에 반영합니다.
 
 ```bash
 git switch team
@@ -156,10 +155,9 @@ git merge local
 git push origin team
 ```
 
-## Updating your local branch from teammate changes
+## 팀원 변경을 내 로컬에 가져오기
 
-If your teammate pushed new commits to `team`, update your own `local` branch
-like this:
+팀원이 `team`에 새 커밋을 올렸다면, 내 `local`은 아래처럼 갱신하면 됩니다.
 
 ```bash
 git fetch px4fork
@@ -167,17 +165,16 @@ git switch local
 git merge px4fork/team
 ```
 
-If your `local` branch has no extra commits and only follows `team`, this also
-works:
+만약 내 `local`이 별도 커밋 없이 `team`만 따라가고 있다면 이것도 가능합니다.
 
 ```bash
 git switch local
 git pull --ff-only
 ```
 
-## Promoting tested changes
+## 검증된 변경 반영
 
-When your `local` work is ready to share with the team:
+내 `local` 작업을 팀에 반영할 때:
 
 ```bash
 git switch team
@@ -186,7 +183,7 @@ git push px4fork team
 git switch local
 ```
 
-When `team` is stable and you want a clean shared reference:
+`team`이 충분히 안정화되어 외부 공유 기준으로 올리고 싶을 때:
 
 ```bash
 git switch share
@@ -195,28 +192,28 @@ git push px4fork share
 git switch local
 ```
 
-## Reusing this work in another project or team
+## 다른 프로젝트나 다른 팀에서 재사용할 때
 
-If another person or another team wants to use this repository as a starting
-point, they should fork this fork and keep their own short branch structure.
+다른 사람이나 다른 팀이 이 저장소를 출발점으로 쓰고 싶다면, 이 저장소를
+다시 fork해서 자기들만의 짧은 브랜치 구조를 유지하는 것이 좋습니다.
 
-Recommended model for another team:
+다른 팀 권장 구조:
 
-- `share`: their stable reference branch
-- `team`: their team integration branch
-- `local`: each developer's personal working branch
+- `share`: 그 팀의 안정 기준 브랜치
+- `team`: 그 팀의 통합 브랜치
+- `local`: 각 개발자의 개인 작업 브랜치
 
-That means:
+즉 구조는 이렇게 됩니다.
 
-- your repository keeps your own `share`, `team`, and `local`
-- another team creates their own fork
-- that fork gets its own `share`, `team`, and `local`
+- 이 저장소는 이 저장소의 `share`, `team`, `local`을 유지
+- 다른 팀은 자기들 fork를 새로 생성
+- 그 fork 안에서 자기들만의 `share`, `team`, `local`을 운영
 
-Do not ask unrelated teams to push directly into your `team` branch. Treat
-your `share` branch as the published baseline and let other teams branch from
-their own fork.
+관련 없는 다른 팀이 네 `team` 브랜치에 직접 push 하도록 하지 않는 것이
+좋습니다. 네 `share`는 공개 기준점으로 두고, 다른 팀은 자기 fork에서
+가지치기해서 쓰는 방식이 가장 깔끔합니다.
 
-Example flow for another team:
+다른 팀 예시 시작 절차:
 
 ```bash
 git clone git@github.com:<their-account>/PX4-Autopilot-HGU.git
@@ -225,11 +222,10 @@ git switch share
 git switch -c local
 ```
 
-## Notes
+## 참고
 
-- The current `rt_controller()` is a stub controller that outputs fixed
-  normalized commands.
-- The telemetry queue is implemented as a single-producer single-consumer
-  queue so the IRQ loop and the non-IRQ flush path do not race.
-- Keep `share` clean, use `team` for collaboration, and do experiments on
-  `local`.
+- 현재 `rt_controller()`는 고정된 normalized 출력을 내보내는 stub 제어기입니다.
+- 텔레메트리 큐는 single-producer single-consumer 구조로 구현되어 있어 IRQ
+  루프와 non-IRQ flush 경로가 경쟁하지 않도록 되어 있습니다.
+- `share`는 깨끗하게 유지하고, 협업은 `team`, 실험은 `local`에서 하는 것을
+  권장합니다.
