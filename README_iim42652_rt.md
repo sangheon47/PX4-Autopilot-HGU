@@ -195,6 +195,36 @@ git push px4fork share
 git switch local
 ```
 
+## Reusing this work in another project or team
+
+If another person or another team wants to use this repository as a starting
+point, they should fork this fork and keep their own short branch structure.
+
+Recommended model for another team:
+
+- `share`: their stable reference branch
+- `team`: their team integration branch
+- `local`: each developer's personal working branch
+
+That means:
+
+- your repository keeps your own `share`, `team`, and `local`
+- another team creates their own fork
+- that fork gets its own `share`, `team`, and `local`
+
+Do not ask unrelated teams to push directly into your `team` branch. Treat
+your `share` branch as the published baseline and let other teams branch from
+their own fork.
+
+Example flow for another team:
+
+```bash
+git clone git@github.com:<their-account>/PX4-Autopilot-HGU.git
+cd PX4-Autopilot-HGU
+git switch share
+git switch -c local
+```
+
 ## Notes
 
 - The current `rt_controller()` is a stub controller that outputs fixed
