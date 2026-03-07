@@ -18,7 +18,7 @@ loop on the CUAV 7-Nano with the IIM42652 driver.
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch share/iim42652-rt
+git switch share
 make cuav_7-nano_default
 ```
 
@@ -106,36 +106,93 @@ Expected status output shows:
 - accel/gyro values
 - PWM and DSHOT outputs
 
-## Recommended local workflow
+## Recommended branch model
 
-Use `share/iim42652-rt` as the clean shared reference branch.
-Do your own work on a separate development branch.
+Use three short branch names:
+
+- `share`: clean reference branch for sharing and reproduction
+- `team`: integration branch used by you and your teammate
+- `local`: your personal working branch
 
 If you cloned this fork directly, a simple setup is:
 
 ```bash
-git switch share/iim42652-rt
-git switch -c dev/iim42652-rt
-```
-
-Then work and build from `dev/iim42652-rt`.
-
-When you want to refresh your local work from the shared branch:
-
-```bash
-git fetch origin
-git switch share/iim42652-rt
-git pull --ff-only
-git switch dev/iim42652-rt
-git merge --ff-only share/iim42652-rt
+git switch share
+git switch -c local
 ```
 
 If you use this repository as a local workspace with the fork configured as
-`px4fork`, the equivalent setup is:
+`px4fork`, a simple setup is:
 
 ```bash
 git fetch px4fork
-git switch -c dev/iim42652-rt px4fork/share/iim42652-rt
+git switch -c share px4fork/share
+git switch -c team px4fork/team
+git switch -c local px4fork/team
+```
+
+Typical flow:
+
+1. Do your own edits on `local`
+2. Merge tested changes into `team`
+3. Promote stable `team` changes into `share`
+
+## Teammate workflow
+
+Your teammate can use the same fork and the same short branch names:
+
+```bash
+git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
+cd PX4-Autopilot-HGU
+git switch -c team origin/team
+git switch -c local
+```
+
+Work on `local`, then merge into `team` when the build is good:
+
+```bash
+git switch team
+git merge local
+git push origin team
+```
+
+## Updating your local branch from teammate changes
+
+If your teammate pushed new commits to `team`, update your own `local` branch
+like this:
+
+```bash
+git fetch px4fork
+git switch local
+git merge px4fork/team
+```
+
+If your `local` branch has no extra commits and only follows `team`, this also
+works:
+
+```bash
+git switch local
+git pull --ff-only
+```
+
+## Promoting tested changes
+
+When your `local` work is ready to share with the team:
+
+```bash
+git switch team
+git merge local
+git push px4fork team
+git switch local
+```
+
+When `team` is stable and you want a clean shared reference:
+
+```bash
+git switch share
+git merge --ff-only team
+git push px4fork share
+git switch local
 ```
 
 ## Notes
@@ -144,5 +201,5 @@ git switch -c dev/iim42652-rt px4fork/share/iim42652-rt
   normalized commands.
 - The telemetry queue is implemented as a single-producer single-consumer
   queue so the IRQ loop and the non-IRQ flush path do not race.
-- For sharing, keep `share/iim42652-rt` clean and use a separate development
-  branch for experiments.
+- Keep `share` clean, use `team` for collaboration, and do experiments on
+  `local`.
