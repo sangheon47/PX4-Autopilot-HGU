@@ -13,6 +13,21 @@ loop on the CUAV 7-Nano with the IIM42652 driver.
 - Split controller logic into `src/lib/rt_control/`.
 - Add UDP telemetry queueing and status reporting.
 
+## Quick start
+
+```bash
+git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
+cd PX4-Autopilot-HGU
+git switch share/iim42652-rt
+make cuav_7-nano_default
+```
+
+Build output:
+
+```bash
+build/cuav_7-nano_default/cuav_7-nano_default.px4
+```
+
 ## Files to inspect first
 
 - `boards/cuav/7-nano/default.px4board`
@@ -28,6 +43,16 @@ loop on the CUAV 7-Nano with the IIM42652 driver.
 ```bash
 make cuav_7-nano_default
 ```
+
+## Flash
+
+If your board is connected and PX4 upload is available:
+
+```bash
+make cuav_7-nano_default upload
+```
+
+Or flash the generated `.px4` file with QGroundControl.
 
 ## Boot behavior
 
@@ -81,9 +106,43 @@ Expected status output shows:
 - accel/gyro values
 - PWM and DSHOT outputs
 
+## Recommended local workflow
+
+Use `share/iim42652-rt` as the clean shared reference branch.
+Do your own work on a separate development branch.
+
+If you cloned this fork directly, a simple setup is:
+
+```bash
+git switch share/iim42652-rt
+git switch -c dev/iim42652-rt
+```
+
+Then work and build from `dev/iim42652-rt`.
+
+When you want to refresh your local work from the shared branch:
+
+```bash
+git fetch origin
+git switch share/iim42652-rt
+git pull --ff-only
+git switch dev/iim42652-rt
+git merge --ff-only share/iim42652-rt
+```
+
+If you use this repository as a local workspace with the fork configured as
+`px4fork`, the equivalent setup is:
+
+```bash
+git fetch px4fork
+git switch -c dev/iim42652-rt px4fork/share/iim42652-rt
+```
+
 ## Notes
 
 - The current `rt_controller()` is a stub controller that outputs fixed
   normalized commands.
 - The telemetry queue is implemented as a single-producer single-consumer
   queue so the IRQ loop and the non-IRQ flush path do not race.
+- For sharing, keep `share/iim42652-rt` clean and use a separate development
+  branch for experiments.
