@@ -1,109 +1,55 @@
-<p align="center">
-  <a href="https://px4.io">
-    <img src="docs/assets/site/px4_logo.svg" alt="PX4 Autopilot" width="240">
-  </a>
-</p>
+# PX4-Autopilot-HGU
 
-<p align="center">
-  <em>The autopilot stack the industry builds on.</em>
-</p>
+이 저장소는 `CUAV 7-Nano + IIM42652` 직접 실시간 루프 실험을 위해 정리한
+PX4 포크입니다.
 
-<p align="center">
-  <a href="https://github.com/PX4/PX4-Autopilot/releases"><img src="https://img.shields.io/github/release/PX4/PX4-Autopilot.svg" alt="Releases"></a>
-  <a href="https://zenodo.org/badge/latestdoi/22634/PX4/PX4-Autopilot"><img src="https://zenodo.org/badge/22634/PX4/PX4-Autopilot.svg" alt="DOI"></a>
-  <a href="https://github.com/PX4/PX4-Autopilot/actions/workflows/build_all_targets.yml"><img src="https://github.com/PX4/PX4-Autopilot/actions/workflows/build_all_targets.yml/badge.svg?branch=main" alt="Build Targets"></a>
-  <a href="https://discord.gg/dronecode"><img src="https://discordapp.com/api/guilds/1022170275984457759/widget.png?style=shield" alt="Discord"></a>
-</p>
+기본 브랜치는 `share`이며, 현재 이 저장소에서는 아래 3개 브랜치 구조를
+기준으로 사용합니다.
 
----
+- `share`: 외부 공유 및 재현용 기준 브랜치
+- `team`: 팀 통합 브랜치
+- `local`: 개인 작업 브랜치
 
-## About
-
-PX4 is an open-source autopilot stack for drones and unmanned vehicles. It supports multirotors, fixed-wing, VTOL, rovers, and many more experimental platforms from racing quads to industrial survey aircraft. It runs on [NuttX](https://nuttx.apache.org/), Linux, and macOS. Licensed under [BSD 3-Clause](LICENSE).
-
-## Why PX4
-
-**Modular architecture.** PX4 is built around [uORB](https://docs.px4.io/main/en/middleware/uorb.html), a [DDS](https://docs.px4.io/main/en/middleware/uxrce_dds.html)-compatible publish/subscribe middleware. Modules are fully parallelized and thread safe. You can build custom configurations and trim what you don't need.
-
-**Wide hardware support.** PX4 runs on a wide range of [autopilot boards](https://docs.px4.io/main/en/flight_controller/) and supports an extensive set of sensors, telemetry radios, and actuators through the [Pixhawk](https://pixhawk.org/) ecosystem.
-
-**Developer friendly.** First-class support for [MAVLink](https://mavlink.io/) and [DDS / ROS 2](https://docs.px4.io/main/en/ros2/) integration. Comprehensive [SITL simulation](https://docs.px4.io/main/en/simulation/), hardware-in-the-loop testing, and [log analysis](https://docs.px4.io/main/en/log/flight_log_analysis.html) tools. An active developer community on [Discord](https://discord.gg/dronecode) and the [weekly dev call](https://docs.px4.io/main/en/contribute/).
-
-**Vendor neutral governance.** PX4 is hosted under the [Dronecode Foundation](https://www.dronecode.org/), part of the Linux Foundation. Business-friendly BSD-3 license. No single vendor controls the roadmap.
-
-## Supported Vehicles
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://docs.px4.io/main/en/frames_multicopter/">
-        <img src="docs/assets/airframes/types/QuadRotorX.svg" width="50" alt="Multicopter"><br>
-        <sub>Multicopter</sub>
-      </a>
-    </td>
-    <td align="center">
-      <a href="https://docs.px4.io/main/en/frames_plane/">
-        <img src="docs/assets/airframes/types/Plane.svg" width="50" alt="Fixed Wing"><br>
-        <sub>Fixed Wing</sub>
-      </a>
-    </td>
-    <td align="center">
-      <a href="https://docs.px4.io/main/en/frames_vtol/">
-        <img src="docs/assets/airframes/types/VTOLPlane.svg" width="50" alt="VTOL"><br>
-        <sub>VTOL</sub>
-      </a>
-    </td>
-    <td align="center">
-      <a href="https://docs.px4.io/main/en/frames_rover/">
-        <img src="docs/assets/airframes/types/Rover.svg" width="50" alt="Rover"><br>
-        <sub>Rover</sub>
-      </a>
-    </td>
-  </tr>
-</table>
-
-<sub>…and many more: helicopters, autogyros, airships, submarines, boats, and other experimental platforms. These frames have basic support but are not part of the regular flight-test program. See the <a href="https://docs.px4.io/main/en/airframes/airframe_reference.html">full airframe reference</a>.</sub>
-
-## Quick Start
+## 빠른 시작
 
 ```bash
-git clone https://github.com/PX4/PX4-Autopilot.git --recursive
-cd PX4-Autopilot
-make px4_sitl
+git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
+cd PX4-Autopilot-HGU
+git switch share
+make cuav_7-nano_default
 ```
 
-> [!NOTE]
-> See the [Development Guide](https://docs.px4.io/main/en/development/development.html) for toolchain setup and build options.
+빌드 결과물:
 
-## Documentation & Resources
+```bash
+build/cuav_7-nano_default/cuav_7-nano_default.px4
+```
 
-| Resource | Description |
-| --- | --- |
-| [User Guide](https://docs.px4.io/main/en/) | Build, configure, and fly with PX4 |
-| [Developer Guide](https://docs.px4.io/main/en/development/development.html) | Modify the flight stack, add peripherals, port to new hardware |
-| [Airframe Reference](https://docs.px4.io/main/en/airframes/airframe_reference.html) | Full list of supported frames |
-| [Autopilot Hardware](https://docs.px4.io/main/en/flight_controller/) | Compatible flight controllers |
-| [Release Notes](https://docs.px4.io/main/en/releases/) | What's new in each release |
-| [Contribution Guide](https://docs.px4.io/main/en/contribute/) | How to contribute to PX4 |
+부팅 후 확인:
 
-## Community
+```bash
+iim42652 status
+```
 
-- **Weekly Dev Call** — open to all developers ([Dronecode calendar](https://www.dronecode.org/calendar/))
-- **Discord** — [Join the Dronecode server](https://discord.gg/dronecode)
-- **Discussion Forum** — [PX4 Discuss](https://discuss.px4.io/)
-- **Maintainers** — see [`MAINTAINERS.md`](MAINTAINERS.md)
-- **Contributor Stats** — [LFX Insights](https://insights.lfx.linuxfoundation.org/foundation/dronecode)
+## 자세한 문서
 
-## Contributing
+실시간 루프 구조, 수정 포인트, 협업 방식, 다른 팀이 fork해서 쓰는 구조는 아래
+문서를 보면 됩니다.
 
-We welcome contributions of all kinds — bug reports, documentation, new features, and code reviews. Please read the [Contribution Guide](https://docs.px4.io/main/en/contribute/) to get started.
+- [README_HGU.md](README_HGU.md)
 
-## Governance
+## 주요 파일
 
-The PX4 Autopilot project is hosted by the [Dronecode Foundation](https://www.dronecode.org/), a [Linux Foundation](https://www.linuxfoundation.org/) Collaborative Project. Dronecode holds all PX4 trademarks and serves as the project's legal guardian, ensuring vendor-neutral stewardship — no single company owns the name or controls the roadmap. The source code is licensed under the [BSD 3-Clause](LICENSE) license, so you are free to use, modify, and distribute it in your own projects.
+- `boards/cuav/7-nano/default.px4board`
+- `boards/cuav/7-nano/init/rc.board_sensors`
+- `ROMFS/px4fmu_common/init.d/rcS`
+- `src/drivers/imu/invensense/iim42652/IIM42652.cpp`
+- `src/drivers/imu/invensense/iim42652/IIM42652.hpp`
+- `src/lib/rt_control/rt_control.c`
+- `src/lib/rt_control/rt_control.h`
 
-<p align="center">
-  <a href="https://www.dronecode.org/">
-    <img src="docs/assets/site/dronecode_logo.svg" alt="Dronecode Logo" width="180">
-  </a>
-</p>
+## 참고
+
+- 이 저장소는 공식 PX4를 기반으로 한 포크입니다.
+- 공식 PX4 원본 저장소: <https://github.com/PX4/PX4-Autopilot>
+- 공식 PX4 문서: <https://docs.px4.io/main/en/>
