@@ -32,6 +32,15 @@
  ****************************************************************************/
 
 #include "IIM42652.hpp"
+#include <drivers/drv_dshot.h>
+#include <drivers/drv_pwm_output.h>
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <unistd.h>
 
 using namespace time_literals;
 
@@ -44,6 +53,27 @@ static constexpr uint16_t combine_uint(uint8_t msb, uint8_t lsb)
 {
 	return (msb << 8u) | lsb;
 }
+
+struct DirectDataRegisterBuffer {
+	uint8_t cmd{static_cast<uint8_t>(Register::BANK_0::TEMP_DATA1) | DIR_READ};
+	uint8_t temp_data1{0};
+	uint8_t temp_data0{0};
+	uint8_t accel_data_x1{0};
+	uint8_t accel_data_x0{0};
+	uint8_t accel_data_y1{0};
+	uint8_t accel_data_y0{0};
+	uint8_t accel_data_z1{0};
+	uint8_t accel_data_z0{0};
+	uint8_t gyro_data_x1{0};
+	uint8_t gyro_data_x0{0};
+	uint8_t gyro_data_y1{0};
+	uint8_t gyro_data_y0{0};
+	uint8_t gyro_data_z1{0};
+	uint8_t gyro_data_z0{0};
+	uint8_t tmst_fsync_h{0};
+	uint8_t tmst_fsync_l{0};
+	uint8_t int_status{0};
+};
 
 IIM42652::IIM42652(const I2CSPIDriverConfig &config) :
 	SPI(config),
@@ -83,8 +113,17 @@ int IIM42652::init()
 	int ret = SPI::init();
 
 	if (ret != PX4_OK) {
-		DEVICE_DEBUG("SPI::init failed (%i)", ret);
+		// DEVICE_DEBUG("SPI::init failed (%i)", ret);
 		return ret;
+	}
+
+	if (!InitActuatorDirect()) {
+		PX4_ERR("actuator direct init failed");
+		return PX4_ERROR;
+	}
+
+	if (!InitUdpTelemetry()) {
+		PX4_WARN("udp telemetry init failed (continue)");
 	}
 
 	return Reset() ? 0 : -1;
@@ -92,6 +131,7 @@ int IIM42652::init()
 
 bool IIM42652::Reset()
 {
+	StopControlLoopIRQ();
 	_state = STATE::RESET;
 	DataReadyInterruptDisable();
 	ScheduleClear();
@@ -101,23 +141,62 @@ bool IIM42652::Reset()
 
 void IIM42652::exit_and_cleanup()
 {
+	StopControlLoopIRQ();
+	DeinitUdpTelemetry();
+	DeinitActuatorDirect();
 	DataReadyInterruptDisable();
 	I2CSPIDriverBase::exit_and_cleanup();
 }
 
 void IIM42652::print_status()
 {
-	I2CSPIDriverBase::print_status();
+	PX4_INFO("RT period_us=%u, freq_hz=%.1f",
+		 (unsigned)CONTROL_PERIOD_US,
+		 (double)(1000000.0 / (double)CONTROL_PERIOD_US));
 
-	PX4_INFO("FIFO empty interval: %d us (%.1f Hz)", _fifo_empty_interval_us, 1e6 / _fifo_empty_interval_us);
-	PX4_INFO("Clock input: %s", _enable_clock_input ? "enabled" : "disabled");
+	if (_last_frame.cycle == 0) {
+		PX4_INFO("RT no cycle yet");
+		return;
+	}
 
-	perf_print_counter(_bad_register_perf);
-	perf_print_counter(_bad_transfer_perf);
-	perf_print_counter(_fifo_empty_perf);
-	perf_print_counter(_fifo_overflow_perf);
-	perf_print_counter(_fifo_reset_perf);
-	perf_print_counter(_drdy_missed_perf);
+	const double start_jitter_s = _last_frame.actual_start_s - _last_frame.ideal_start_s;
+	const unsigned long overrun_us = (_last_frame.exec_us > CONTROL_PERIOD_US)
+					 ? (unsigned long)(_last_frame.exec_us - CONTROL_PERIOD_US)
+					 : 0UL;
+
+	PX4_INFO("RT cycle=%lu ideal_start_s=%.6f actual_start_s=%.6f start_jitter_s=%+.6f",
+		(unsigned long)_last_frame.cycle,
+		_last_frame.ideal_start_s,
+		_last_frame.actual_start_s,
+		start_jitter_s);
+
+	PX4_INFO("RT time input_us=%lu control_us=%lu output_us=%lu exec_us=%lu slack_us=%lu overrun_us=%lu",
+		 (unsigned long)_last_frame.input_us,
+		 (unsigned long)_last_frame.control_us,
+		 (unsigned long)_last_frame.output_us,
+		 (unsigned long)_last_frame.exec_us,
+		 (unsigned long)_last_frame.slack_us,
+		 overrun_us);
+
+	PX4_INFO("RT accel_m_s2: x=%.5f y=%.5f z=%.5f gyro_rad_s: roll=%.5f pitch=%.5f yaw=%.5f",
+		 (double)_last_frame.accel_m_s2[0], (double)_last_frame.accel_m_s2[1], (double)_last_frame.accel_m_s2[2],
+		 (double)_last_frame.gyro_rad_s[0], (double)_last_frame.gyro_rad_s[1], (double)_last_frame.gyro_rad_s[2]);
+
+	PX4_INFO("RT servo_pwm_us=%u(%.2f%%) %u(%.2f%%) %u(%.2f%%) %u(%.2f%%) bldc_dshot=%u(%.2f%%) %u(%.2f%%)",
+		 (unsigned)_last_frame.servo_pwm_us[0], (double)(_last_frame.motor_norm[0] * 100.f),
+		 (unsigned)_last_frame.servo_pwm_us[1], (double)(_last_frame.motor_norm[1] * 100.f),
+		 (unsigned)_last_frame.servo_pwm_us[2], (double)(_last_frame.motor_norm[2] * 100.f),
+		 (unsigned)_last_frame.servo_pwm_us[3], (double)(_last_frame.motor_norm[3] * 100.f),
+		 (unsigned)_last_frame.bldc_dshot[0], (double)(_last_frame.motor_norm[4] * 100.f),
+		 (unsigned)_last_frame.bldc_dshot[1], (double)(_last_frame.motor_norm[5] * 100.f));
+
+	PX4_INFO("RT perf bad_xfer=%lu fifo_empty=%lu fifo_overflow=%lu bad_reg=%lu failure_count=%u missed_cycles=%lu",
+		 (unsigned long)perf_event_count(_bad_transfer_perf),
+		 (unsigned long)perf_event_count(_fifo_empty_perf),
+		 (unsigned long)perf_event_count(_fifo_overflow_perf),
+		 (unsigned long)perf_event_count(_bad_register_perf),
+		 (unsigned)_failure_count,
+		 (unsigned long)_last_frame.missed_cycles);
 }
 
 int IIM42652::probe()
@@ -187,7 +266,7 @@ void IIM42652::RunImpl()
 	case STATE::CONFIGURE:
 		if (Configure()) {
 			// if configure succeeded then reset the FIFO
-			_state = STATE::FIFO_RESET;
+			_state = STATE::RT_LOOP_INIT;
 			ScheduleDelayed(1_ms);
 
 		} else {
@@ -205,27 +284,41 @@ void IIM42652::RunImpl()
 
 		break;
 
-	case STATE::FIFO_RESET:
+	case STATE::RT_LOOP_INIT:
 
-		_state = STATE::FIFO_READ;
-		FIFOReset();
-
-		if (DataReadyInterruptConfigure()) {
-			_data_ready_interrupt_enabled = true;
-
-			// backup schedule as a watchdog timeout
-			ScheduleDelayed(100_ms);
-
-		} else {
+			_state = STATE::RT_LOOP_RUN;
+			FIFOReset();
+			DataReadyInterruptDisable();
 			_data_ready_interrupt_enabled = false;
-			ScheduleOnInterval(_fifo_empty_interval_us, _fifo_empty_interval_us);
-		}
+			StartControlLoopIRQ();
+			ScheduleDelayed(100_ms); // housekeeping + telemetry flush
 
-		break;
+			break;
 
-	case STATE::FIFO_READ: {
-			hrt_abstime timestamp_sample = now;
-			uint8_t samples = 0;
+	case STATE::RT_LOOP_RUN: {
+					if (_control_loop_running) {
+						PublishSampleOutsideIRQ();
+						FlushTelemetry(64);
+
+					if (_request_reset) {
+						_request_reset = false;
+						Reset();
+						return;
+					}
+
+					if (_fifo_flush_pending) {
+						_fifo_flush_pending = false;
+						StopControlLoopIRQ();
+						FIFOReset();
+						StartControlLoopIRQ();
+					}
+
+						ScheduleDelayed(CONTROL_PERIOD_US);
+						break;
+					}
+
+				hrt_abstime timestamp_sample = now;
+				uint8_t samples = 0;
 
 			if (_data_ready_interrupt_enabled) {
 				// scheduled from interrupt if _drdy_timestamp_sample was set as expected
@@ -417,7 +510,9 @@ bool IIM42652::Configure()
 	// 20-bits data format used
 	//  the only FSR settings that are operational are ±2000dps for gyroscope and ±16g for accelerometer
 	_px4_accel.set_range(16.f * CONSTANTS_ONE_G);
+	_px4_accel.set_scale(CONSTANTS_ONE_G / 2048.f);
 	_px4_gyro.set_range(math::radians(2000.f));
+	_px4_gyro.set_scale(math::radians(2000.f / 32768.f));
 
 	return success;
 }
@@ -601,6 +696,7 @@ bool IIM42652::FIFORead(const hrt_abstime &timestamp_sample, uint8_t samples)
 		if (ProcessTemperature(buffer.f, valid_samples)) {
 			ProcessGyro(timestamp_sample, buffer.f, valid_samples);
 			ProcessAccel(timestamp_sample, buffer.f, valid_samples);
+
 			return true;
 		}
 	}
@@ -661,11 +757,11 @@ void IIM42652::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DAT
 		// Sign extension + Accel [19:12] + Accel [11:4] + Accel [3:2] (20 bit extension byte)
 		// Accel data is 18 bit ()
 		int32_t accel_x = reassemble_20bit(fifo[i].ACCEL_DATA_X1, fifo[i].ACCEL_DATA_X0,
-						   fifo[i].Ext_Accel_X_Gyro_X & 0xF0 >> 4);
+						   (fifo[i].Ext_Accel_X_Gyro_X & 0xF0) >> 4);
 		int32_t accel_y = reassemble_20bit(fifo[i].ACCEL_DATA_Y1, fifo[i].ACCEL_DATA_Y0,
-						   fifo[i].Ext_Accel_Y_Gyro_Y & 0xF0 >> 4);
+						   (fifo[i].Ext_Accel_Y_Gyro_Y & 0xF0) >> 4);
 		int32_t accel_z = reassemble_20bit(fifo[i].ACCEL_DATA_Z1, fifo[i].ACCEL_DATA_Z0,
-						   fifo[i].Ext_Accel_Z_Gyro_Z & 0xF0 >> 4);
+						   (fifo[i].Ext_Accel_Z_Gyro_Z & 0xF0) >> 4);
 
 		// sample invalid if -524288
 		if (accel_x != -524288 && accel_y != -524288 && accel_z != -524288) {
@@ -715,6 +811,8 @@ void IIM42652::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DAT
 		_px4_accel.set_scale(CONSTANTS_ONE_G / 2048.f);
 	}
 
+	const float accel_scale = scale_20bit ? (CONSTANTS_ONE_G / 2048.f) : (CONSTANTS_ONE_G / 8192.f);
+
 	// correct frame for publication
 	for (int i = 0; i < accel.samples; i++) {
 		// sensor's frame is +x forward, +y left, +z up
@@ -728,7 +826,11 @@ void IIM42652::ProcessAccel(const hrt_abstime &timestamp_sample, const FIFO::DAT
 				   perf_event_count(_fifo_empty_perf) + perf_event_count(_fifo_overflow_perf));
 
 	if (accel.samples > 0) {
-		_px4_accel.updateFIFO(accel);
+		const int last = accel.samples - 1;
+		// 여기서 사용한 실제 scale 값(accel_scale)을 곱해서 SI 단위로 저장
+		_latest_accel_m_s2[0] = accel.x[last] * accel_scale;
+		_latest_accel_m_s2[1] = accel.y[last] * accel_scale;
+		_latest_accel_m_s2[2] = accel.z[last] * accel_scale;
 	}
 }
 
@@ -796,6 +898,8 @@ void IIM42652::ProcessGyro(const hrt_abstime &timestamp_sample, const FIFO::DATA
 		_px4_gyro.set_scale(math::radians(2000.f / 32768.f));
 	}
 
+	const float gyro_scale = scale_20bit ? math::radians(2000.f / 32768.f) : math::radians(1.f / 131.f);
+
 	// correct frame for publication
 	for (int i = 0; i < gyro.samples; i++) {
 		// sensor's frame is +x forward, +y left, +z up
@@ -809,7 +913,11 @@ void IIM42652::ProcessGyro(const hrt_abstime &timestamp_sample, const FIFO::DATA
 				  perf_event_count(_fifo_empty_perf) + perf_event_count(_fifo_overflow_perf));
 
 	if (gyro.samples > 0) {
-		_px4_gyro.updateFIFO(gyro);
+		const int last = gyro.samples - 1;
+		// 여기서 사용한 실제 scale 값(gyro_scale)을 곱해서 SI 단위로 저장
+		_latest_gyro_rad_s[0] = gyro.x[last] * gyro_scale;
+		_latest_gyro_rad_s[1] = gyro.y[last] * gyro_scale;
+		_latest_gyro_rad_s[2] = gyro.z[last] * gyro_scale;
 	}
 }
 
@@ -856,4 +964,370 @@ bool IIM42652::ProcessTemperature(const FIFO::DATA fifo[], const uint8_t samples
 	}
 
 	return false;
+}
+
+void IIM42652::ControlLoopTrampoline(void *arg)
+{
+	IIM42652 *self = static_cast<IIM42652 *>(arg);
+
+	if (self != nullptr) {
+		self->ControlLoopIRQ();
+	}
+}
+
+void IIM42652::StartControlLoopIRQ()
+{
+	if (_control_loop_running) {
+		return;
+	}
+
+	hrt_call_init(&_control_loop_call);
+	rt_control_state_reset(&_rt_control_state);
+	rt_control_queue_reset(&_tx_q);
+	// Base time is set once before the periodic callback starts to avoid per-cycle init checks.
+	_rt_control_state.t0_us = static_cast<uint64_t>(hrt_absolute_time()) + CONTROL_PERIOD_US;
+	_rt_control_state.last_control_ts_us = 0U;
+	_rt_control_state.deadline_miss_count = 0U;
+	_request_reset = false;
+	_fifo_flush_pending = false;
+	_latest_publish_seq.store(0);
+	_published_seq = 0;
+	_tx_err_count = 0;
+
+	hrt_call_every(&_control_loop_call, CONTROL_PERIOD_US, CONTROL_PERIOD_US, ControlLoopTrampoline, this);
+	_control_loop_running = true;
+}
+
+void IIM42652::StopControlLoopIRQ()
+{
+	if (_control_loop_running) {
+		hrt_cancel(&_control_loop_call);
+		_control_loop_running = false;
+	}
+}
+
+void IIM42652::ControlLoopIRQ()
+{
+	if (_state != STATE::RT_LOOP_RUN) {
+		return;
+	}
+
+	const hrt_abstime cycle_begin = hrt_absolute_time();
+
+	// Sensor Read
+	const hrt_abstime timestamp_sample = cycle_begin;
+	const bool read_ok = ReadSampleDirect(timestamp_sample);
+	const uint32_t input_us = static_cast<uint32_t>(hrt_absolute_time() - cycle_begin);
+
+	if (read_ok) {
+		if (_failure_count > 0) {
+			_failure_count--;
+		}
+
+	} else {
+		_failure_count++;
+
+		if (_failure_count > 10) {
+			_request_reset = true;
+		}
+	}
+
+	// Compute Output
+	float motor_norm[MOTOR_COUNT] {};
+	const hrt_abstime control_begin = hrt_absolute_time();
+	rt_controller(_latest_accel_m_s2, _latest_gyro_rad_s, motor_norm);
+	const uint32_t control_us = static_cast<uint32_t>(hrt_absolute_time() - control_begin);
+
+	// Write actuator
+	ActuatorWriteResult write_result{};
+	const hrt_abstime output_begin = hrt_absolute_time();
+	WriteStep(motor_norm, write_result);
+	const uint32_t output_us = static_cast<uint32_t>(hrt_absolute_time() - output_begin);
+
+	// Telemetry Write & Send
+	TelemetryStep(cycle_begin, input_us, control_us, output_us, motor_norm, write_result);
+}
+
+bool IIM42652::ReadSampleDirect(const hrt_abstime &timestamp_sample)
+{
+	DirectDataRegisterBuffer buffer{};
+	SelectRegisterBank(REG_BANK_SEL_BIT::BANK_SEL_0);
+
+	if (transfer(reinterpret_cast<uint8_t *>(&buffer), reinterpret_cast<uint8_t *>(&buffer), sizeof(buffer)) != PX4_OK) {
+		perf_count(_bad_transfer_perf);
+		return false;
+	}
+
+	const int16_t accel_x = combine(buffer.accel_data_x1, buffer.accel_data_x0);
+	const int16_t accel_y = combine(buffer.accel_data_y1, buffer.accel_data_y0);
+	const int16_t accel_z = combine(buffer.accel_data_z1, buffer.accel_data_z0);
+	const int16_t gyro_x = combine(buffer.gyro_data_x1, buffer.gyro_data_x0);
+	const int16_t gyro_y = combine(buffer.gyro_data_y1, buffer.gyro_data_y0);
+	const int16_t gyro_z = combine(buffer.gyro_data_z1, buffer.gyro_data_z0);
+	const int16_t temp = combine(buffer.temp_data1, buffer.temp_data0);
+
+	const float accel_raw_x = static_cast<float>(accel_x);
+	const float accel_raw_y = static_cast<float>((accel_y == INT16_MIN) ? INT16_MAX : -accel_y);
+	const float accel_raw_z = static_cast<float>((accel_z == INT16_MIN) ? INT16_MAX : -accel_z);
+	const float gyro_raw_x = static_cast<float>(gyro_x);
+	const float gyro_raw_y = static_cast<float>((gyro_y == INT16_MIN) ? INT16_MAX : -gyro_y);
+	const float gyro_raw_z = static_cast<float>((gyro_z == INT16_MIN) ? INT16_MAX : -gyro_z);
+
+	static constexpr float accel_scale = CONSTANTS_ONE_G / 2048.f; // +/-16g
+	static constexpr float gyro_scale = math::radians(2000.f / 32768.f); // +/-2000 dps
+
+	_latest_accel_m_s2[0] = accel_raw_x * accel_scale;
+	_latest_accel_m_s2[1] = accel_raw_y * accel_scale;
+	_latest_accel_m_s2[2] = accel_raw_z * accel_scale;
+
+	_latest_gyro_rad_s[0] = gyro_raw_x * gyro_scale;
+	_latest_gyro_rad_s[1] = gyro_raw_y * gyro_scale;
+	_latest_gyro_rad_s[2] = gyro_raw_z * gyro_scale;
+
+	const float temp_degC = (temp / TEMPERATURE_SENSITIVITY) + TEMPERATURE_OFFSET;
+
+	const uint32_t seq = _latest_publish_seq.load();
+	_latest_publish_seq.store(seq + 1); // writer begin (odd)
+	_latest_publish_sample.timestamp_sample = timestamp_sample;
+	_latest_publish_sample.accel_raw[0] = accel_raw_x;
+	_latest_publish_sample.accel_raw[1] = accel_raw_y;
+	_latest_publish_sample.accel_raw[2] = accel_raw_z;
+	_latest_publish_sample.gyro_raw[0] = gyro_raw_x;
+	_latest_publish_sample.gyro_raw[1] = gyro_raw_y;
+	_latest_publish_sample.gyro_raw[2] = gyro_raw_z;
+	_latest_publish_sample.temperature_degC = temp_degC;
+	_latest_publish_seq.store(seq + 2); // writer end (even)
+
+	return true;
+}
+
+void IIM42652::PublishSampleOutsideIRQ()
+{
+	LatestPublishSample sample{};
+	uint32_t seq_begin{0};
+	uint32_t seq_end{0};
+
+	do {
+		seq_begin = _latest_publish_seq.load();
+
+		if (seq_begin == 0 || (seq_begin & 1u)) {
+			return;
+		}
+
+		sample = _latest_publish_sample;
+		seq_end = _latest_publish_seq.load();
+
+	} while ((seq_begin != seq_end) || (seq_end & 1u));
+
+	if (seq_end == _published_seq) {
+		return;
+	}
+
+	_published_seq = seq_end;
+
+	if (PX4_ISFINITE(sample.temperature_degC)) {
+		_px4_accel.set_temperature(sample.temperature_degC);
+		_px4_gyro.set_temperature(sample.temperature_degC);
+	}
+
+	const uint32_t error_count = perf_event_count(_bad_register_perf) + perf_event_count(_bad_transfer_perf)
+				     + perf_event_count(_fifo_empty_perf) + perf_event_count(_fifo_overflow_perf);
+	_px4_accel.set_error_count(error_count);
+	_px4_gyro.set_error_count(error_count);
+
+	_px4_accel.update(sample.timestamp_sample, sample.accel_raw[0], sample.accel_raw[1], sample.accel_raw[2]);
+	_px4_gyro.update(sample.timestamp_sample, sample.gyro_raw[0], sample.gyro_raw[1], sample.gyro_raw[2]);
+}
+
+void IIM42652::TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, uint32_t control_us, uint32_t output_us,
+			     const float motor_norm[MOTOR_COUNT], const ActuatorWriteResult &write_result)
+{
+	TelemetryFrame f{};
+	const uint64_t now_us = static_cast<uint64_t>(cycle_begin);
+	_rt_control_state.cycle++;
+	f.cycle = _rt_control_state.cycle;
+	f.ideal_start_s = ((double)(f.cycle - 1U) * (double)CONTROL_PERIOD_US) * 1e-6;
+	f.actual_start_s = ((double)(now_us - _rt_control_state.t0_us)) * 1e-6;
+
+	uint32_t dt_actual_us = 0U;
+
+	if ((_rt_control_state.last_control_ts_us != 0U) && (now_us >= _rt_control_state.last_control_ts_us)) {
+		dt_actual_us = static_cast<uint32_t>(now_us - _rt_control_state.last_control_ts_us);
+	}
+
+	_rt_control_state.last_control_ts_us = now_us;
+
+	if (dt_actual_us > CONTROL_PERIOD_US) {
+		const uint32_t skipped = (dt_actual_us / CONTROL_PERIOD_US) - 1U;
+		_rt_control_state.deadline_miss_count += skipped;
+	}
+
+	if (dt_actual_us > _rt_control_state.max_loop_dt_us) {
+		_rt_control_state.max_loop_dt_us = dt_actual_us;
+	}
+
+	f.missed_cycles = _rt_control_state.deadline_miss_count;
+
+	for (uint8_t i = 0; i < 3U; i++) {
+		f.accel_m_s2[i] = _latest_accel_m_s2[i];
+		f.gyro_rad_s[i] = _latest_gyro_rad_s[i];
+	}
+
+	for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+		f.motor_norm[i] = motor_norm[i];
+	}
+
+	for (uint8_t i = 0; i < SERVO_COUNT; i++) {
+		f.servo_pwm_us[i] = write_result.servo_pwm_us[i];
+	}
+
+	for (uint8_t i = 0; i < BLDC_COUNT; i++) {
+		f.bldc_dshot[i] = write_result.bldc_dshot[i];
+	}
+
+	f.input_us = input_us;
+	f.control_us = control_us;
+	f.output_us = output_us;
+
+	f.exec_us = static_cast<uint32_t>(hrt_absolute_time() - cycle_begin);
+	f.slack_us = (f.exec_us < CONTROL_PERIOD_US) ? (CONTROL_PERIOD_US - f.exec_us) : 0U;
+
+	_last_frame = f;
+	EnqueueTelemetry(f);
+}
+
+void IIM42652::WriteStep(const float motor_norm[MOTOR_COUNT], ActuatorWriteResult &out)
+{
+	for (int i = 0; i < SERVO_COUNT; i++) {
+		const float u = math::constrain(motor_norm[i], 0.f, 1.f);
+		const uint16_t pwm = PWM_MIN_US + static_cast<uint16_t>(u * (PWM_MAX_US - PWM_MIN_US));
+		out.servo_pwm_us[i] = pwm;
+		up_pwm_servo_set(i, pwm);
+	}
+	up_pwm_update(_servo_mask);
+
+	for (int i = 0; i < BLDC_COUNT; i++) {
+		const float u = math::constrain(motor_norm[SERVO_COUNT + i], 0.f, 1.f);
+		const uint16_t dshot_throttle = static_cast<uint16_t>(u * DSHOT_THROTTLE_MAX);
+		out.bldc_dshot[i] = dshot_throttle;
+
+		if (_dshot_initialized) {
+			up_dshot_motor_data_set(SERVO_COUNT + i, dshot_throttle, false);
+		}
+	}
+
+	if (_dshot_initialized) {
+		up_dshot_trigger();
+	}
+}
+
+bool IIM42652::InitUdpTelemetry()
+{
+	_udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (_udp_fd < 0) {
+		return false;
+	}
+
+	const int flags = fcntl(_udp_fd, F_GETFL, 0);
+	if (flags >= 0) {
+		fcntl(_udp_fd, F_SETFL, flags | O_NONBLOCK);
+	}
+
+	_telem_ip = inet_addr("192.168.0.10"); // 수신 PC IP로 변경
+	_telem_port = 14556;
+	return true;
+}
+
+void IIM42652::EnqueueTelemetry(const TelemetryFrame &f)
+{
+	rt_control_queue_enqueue(&_tx_q, &f);
+}
+
+void IIM42652::FlushTelemetry(uint8_t budget)
+{
+	if (_udp_fd < 0) { return; }
+
+	sockaddr_in dst{};
+	dst.sin_family = AF_INET;
+	dst.sin_port = htons(_telem_port);
+	dst.sin_addr.s_addr = _telem_ip;
+
+	for (uint8_t i = 0; i < budget; i++) {
+		TelemetryFrame frame{};
+
+		if (!rt_control_queue_copy_peek(&_tx_q, &frame)) {
+			break;
+		}
+
+		const ssize_t n = sendto(_udp_fd, &frame, sizeof(frame), 0, reinterpret_cast<sockaddr *>(&dst), sizeof(dst));
+
+		if (n < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				break;
+			}
+
+			_tx_err_count++;
+			rt_control_queue_pop(&_tx_q); // 오류 프레임 드랍
+			continue;
+		}
+
+		rt_control_queue_pop(&_tx_q);
+	}
+}
+
+bool IIM42652::InitActuatorDirect()
+{
+	if (_pwm_initialized) {
+		return true;
+	}
+
+	if (up_pwm_servo_init(_servo_mask) < 0) {
+		return false;
+	}
+
+	up_pwm_servo_arm(true, _servo_mask);
+	_pwm_initialized = true;
+
+	const int dshot_init_mask = up_dshot_init(_dshot_mask, DSHOT_PWM_RATE, false);
+
+	if (dshot_init_mask < 0 || ((uint32_t)dshot_init_mask & _dshot_mask) != _dshot_mask) {
+		up_pwm_servo_arm(false, _servo_mask);
+		up_pwm_servo_deinit(_servo_mask);
+		_pwm_initialized = false;
+		PX4_ERR("dshot init failed (ret=%d, req=0x%lx)", dshot_init_mask, (unsigned long)_dshot_mask);
+		return false;
+	}
+
+	if (up_dshot_arm(true) < 0) {
+		up_pwm_servo_arm(false, _servo_mask);
+		up_pwm_servo_deinit(_servo_mask);
+		_pwm_initialized = false;
+		PX4_ERR("dshot arm failed");
+		return false;
+	}
+
+	_dshot_initialized = true;
+	return true;
+}
+
+void IIM42652::DeinitActuatorDirect()
+{
+	if (_dshot_initialized) {
+		up_dshot_arm(false);
+		_dshot_initialized = false;
+	}
+
+	if (_pwm_initialized) {
+		up_pwm_servo_arm(false, _servo_mask);
+		up_pwm_servo_deinit(_servo_mask);
+		_pwm_initialized = false;
+	}
+}
+
+void IIM42652::DeinitUdpTelemetry()
+{
+	if (_udp_fd >= 0) {
+		::close(_udp_fd);
+		_udp_fd = -1;
+	}
 }

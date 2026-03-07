@@ -36,11 +36,14 @@ px4_add_module(
 	COMPILE_FLAGS
 		${MAX_CUSTOM_OPT_LEVEL}
 		#-DDEBUG_BUILD
+	INCLUDES
+		../../../../lib
 	SRCS
 		iim42652_main.cpp
 		IIM42652.cpp
 		IIM42652.hpp
 		InvenSense_IIM42652_registers.hpp
+		../../../../lib/rt_control/rt_control.c
 	DEPENDS
 		px4_work_queue
 		drivers_accelerometer

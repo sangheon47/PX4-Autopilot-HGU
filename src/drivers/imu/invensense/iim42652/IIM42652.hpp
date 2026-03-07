@@ -51,6 +51,10 @@
 #include <px4_platform_common/atomic.h>
 #include <px4_platform_common/i2c_spi_buses.h>
 
+extern "C" {
+#include <rt_control/rt_control.h>
+}
+
 using namespace InvenSense_IIM42652;
 
 class IIM42652 : public device::SPI, public I2CSPIDriver<IIM42652>
@@ -70,7 +74,7 @@ private:
 	void exit_and_cleanup() override;
 
 	// Sensor Configuration
-	static constexpr float FIFO_SAMPLE_DT{1e6f / 8000.f};     // 8000 Hz accel & gyro ODR configured
+	static constexpr float FIFO_SAMPLE_DT{1e6f / 1000.f};     // 1000 Hz accel & gyro ODR configured
 	static constexpr float GYRO_RATE{1e6f / FIFO_SAMPLE_DT};
 	static constexpr float ACCEL_RATE{1e6f / FIFO_SAMPLE_DT};
 
@@ -171,8 +175,8 @@ private:
 		RESET,
 		WAIT_FOR_RESET,
 		CONFIGURE,
-		FIFO_RESET,
-		FIFO_READ,
+		RT_LOOP_INIT,
+		RT_LOOP_RUN,
 	} _state{STATE::RESET};
 
 	uint16_t _fifo_empty_interval_us{1250}; // default 1250 us / 800 Hz transfer interval
@@ -183,21 +187,21 @@ private:
 	register_bank0_config_t _register_bank0_cfg[size_register_bank0_cfg] {
 		// Register                              | Set bits, Clear bits
 		{ Register::BANK_0::INT_CONFIG,           INT_CONFIG_BIT::INT1_MODE | INT_CONFIG_BIT::INT1_DRIVE_CIRCUIT, INT_CONFIG_BIT::INT1_POLARITY },
-		{ Register::BANK_0::FIFO_CONFIG,          FIFO_CONFIG_BIT::FIFO_MODE_STOP_ON_FULL, 0 },
+		{ Register::BANK_0::FIFO_CONFIG,          0, FIFO_CONFIG_BIT::FIFO_MODE_STOP_ON_FULL },
 		{ Register::BANK_0::INTF_CONFIG1,         INTF_CONFIG1_BIT::AFSR_SET, INTF_CONFIG1_BIT::AFSR_CLEAR}, // RTC_MODE[2] set at runtime
 		{ Register::BANK_0::PWR_MGMT0,            PWR_MGMT0_BIT::GYRO_MODE_LOW_NOISE | PWR_MGMT0_BIT::ACCEL_MODE_LOW_NOISE, 0 },
-		{ Register::BANK_0::GYRO_CONFIG0,         GYRO_CONFIG0_BIT::GYRO_FS_SEL_2000_DPS | GYRO_CONFIG0_BIT::GYRO_ODR_8KHZ_SET, GYRO_CONFIG0_BIT::GYRO_ODR_8KHZ_CLEAR },
-		{ Register::BANK_0::ACCEL_CONFIG0,        ACCEL_CONFIG0_BIT::ACCEL_FS_SEL_16G | ACCEL_CONFIG0_BIT::ACCEL_ODR_8KHZ_SET, ACCEL_CONFIG0_BIT::ACCEL_ODR_8KHZ_CLEAR },
+		{ Register::BANK_0::GYRO_CONFIG0,         GYRO_CONFIG0_BIT::GYRO_FS_SEL_2000_DPS | GYRO_CONFIG0_BIT::GYRO_ODR_1KHZ_SET, GYRO_CONFIG0_BIT::GYRO_ODR_1KHZ_CLEAR },
+		{ Register::BANK_0::ACCEL_CONFIG0,        ACCEL_CONFIG0_BIT::ACCEL_FS_SEL_16G | ACCEL_CONFIG0_BIT::ACCEL_ODR_1KHZ_SET, ACCEL_CONFIG0_BIT::ACCEL_ODR_1KHZ_CLEAR },
 		{ Register::BANK_0::GYRO_CONFIG1,         0, GYRO_CONFIG1_BIT::GYRO_UI_FILT_ORD },
 		{ Register::BANK_0::GYRO_ACCEL_CONFIG0,   0, GYRO_ACCEL_CONFIG0_BIT::ACCEL_UI_FILT_BW | GYRO_ACCEL_CONFIG0_BIT::GYRO_UI_FILT_BW },
 		{ Register::BANK_0::ACCEL_CONFIG1,        0, ACCEL_CONFIG1_BIT::ACCEL_UI_FILT_ORD },
 		{ Register::BANK_0::TMST_CONFIG,          TMST_CONFIG_BIT::TMST_EN | TMST_CONFIG_BIT::TMST_DELTA_EN | TMST_CONFIG_BIT::TMST_TO_REGS_EN | TMST_CONFIG_BIT::TMST_RES, TMST_CONFIG_BIT::TMST_FSYNC_EN },
-		{ Register::BANK_0::FIFO_CONFIG1,         FIFO_CONFIG1_BIT::FIFO_WM_GT_TH | FIFO_CONFIG1_BIT::FIFO_HIRES_EN | FIFO_CONFIG1_BIT::FIFO_TEMP_EN | FIFO_CONFIG1_BIT::FIFO_GYRO_EN | FIFO_CONFIG1_BIT::FIFO_ACCEL_EN, FIFO_CONFIG1_BIT::FIFO_TMST_FSYNC_EN },
+		{ Register::BANK_0::FIFO_CONFIG1,         0, FIFO_CONFIG1_BIT::FIFO_WM_GT_TH | FIFO_CONFIG1_BIT::FIFO_HIRES_EN | FIFO_CONFIG1_BIT::FIFO_TEMP_EN | FIFO_CONFIG1_BIT::FIFO_GYRO_EN | FIFO_CONFIG1_BIT::FIFO_ACCEL_EN | FIFO_CONFIG1_BIT::FIFO_TMST_FSYNC_EN },
 		{ Register::BANK_0::FIFO_CONFIG2,         0, 0 }, // FIFO_WM[7:0] set at runtime
 		{ Register::BANK_0::FIFO_CONFIG3,         0, 0 }, // FIFO_WM[11:8] set at runtime
-		{ Register::BANK_0::INT_CONFIG0,          INT_CONFIG0_BIT::CLEAR_ON_FIFO_READ, 0 },
+		{ Register::BANK_0::INT_CONFIG0,          0, INT_CONFIG0_BIT::CLEAR_ON_FIFO_READ },
 		{ Register::BANK_0::INT_CONFIG1,          0, INT_CONFIG1_BIT::INT_ASYNC_RESET },
-		{ Register::BANK_0::INT_SOURCE0,          INT_SOURCE0_BIT::FIFO_THS_INT1_EN, 0 },
+		{ Register::BANK_0::INT_SOURCE0,          0, INT_SOURCE0_BIT::FIFO_THS_INT1_EN },
 	};
 
 	uint8_t _checked_register_bank1{0};
@@ -219,4 +223,73 @@ private:
 		{ Register::BANK_2::ACCEL_CONFIG_STATIC3, ACCEL_CONFIG_STATIC3_BIT::ACCEL_AAF_DELTSQR_LSB_585HZ_SET, ACCEL_CONFIG_STATIC3_BIT::ACCEL_AAF_DELTSQR_LSB_585HZ_CLEAR },
 		{ Register::BANK_2::ACCEL_CONFIG_STATIC4, ACCEL_CONFIG_STATIC4_BIT::ACCEL_AAF_BITSHIFT_585HZ_SET | ACCEL_CONFIG_STATIC4_BIT::ACCEL_AAF_DELTSQR_MSB_SET, ACCEL_CONFIG_STATIC4_BIT::ACCEL_AAF_BITSHIFT_585HZ_CLEAR | ACCEL_CONFIG_STATIC4_BIT::ACCEL_AAF_DELTSQR_MSB_CLEAR },
 	};
+
+	// --- realtime control + telemetry ---
+
+	static constexpr uint8_t SERVO_COUNT{static_cast<uint8_t>(RT_CTRL_SERVO_COUNT)};
+	static constexpr uint8_t BLDC_COUNT{static_cast<uint8_t>(RT_CTRL_BLDC_COUNT)};
+	static constexpr uint8_t MOTOR_COUNT{static_cast<uint8_t>(RT_CTRL_MOTOR_COUNT)};
+	static constexpr uint16_t PWM_MIN_US{1000};
+	static constexpr uint16_t PWM_MAX_US{2000};
+	static constexpr uint16_t CONTROL_PERIOD_US{5000}; // 200 Hz
+	static constexpr uint16_t DSHOT_THROTTLE_MAX{1999};
+	static constexpr unsigned DSHOT_PWM_RATE{600000U}; // DSHOT600
+
+	using TelemetryFrame = rt_control_telemetry_frame_t;
+	rt_control_queue_t _tx_q{};
+
+	TelemetryFrame _last_frame{}; // status 출력용(가장 최근 주기)
+
+	float _latest_accel_m_s2[3]{};
+	float _latest_gyro_rad_s[3]{};
+	struct LatestPublishSample {
+		hrt_abstime timestamp_sample{0};
+		float accel_raw[3]{};
+		float gyro_raw[3]{};
+		float temperature_degC{0.f};
+	};
+	LatestPublishSample _latest_publish_sample{};
+	px4::atomic<uint32_t> _latest_publish_seq{0}; // odd: writer in progress, even: stable
+	uint32_t _published_seq{0};
+
+	bool _pwm_initialized{false};
+	bool _dshot_initialized{false};
+	uint32_t _servo_mask{(1u << SERVO_COUNT) - 1};
+	uint32_t _dshot_mask{(1u << 4) | (1u << 5)};
+
+	int _udp_fd{-1};
+	uint32_t _telem_ip{0}; // network byte order
+	uint16_t _telem_port{14556};
+
+	uint32_t _tx_err_count{0};
+
+	rt_control_state_t _rt_control_state{};
+	hrt_call _control_loop_call{};
+	bool _control_loop_running{false};
+	volatile bool _request_reset{false};
+	volatile bool _fifo_flush_pending{false};
+
+	struct ActuatorWriteResult {
+		uint16_t servo_pwm_us[SERVO_COUNT]{};
+		uint16_t bldc_dshot[BLDC_COUNT]{};
+	};
+
+	bool InitActuatorDirect();
+	void DeinitActuatorDirect();
+	void WriteStep(const float motor_norm[MOTOR_COUNT], ActuatorWriteResult &out);
+
+	bool InitUdpTelemetry();
+	void DeinitUdpTelemetry();
+	void EnqueueTelemetry(const TelemetryFrame &frame);
+	void FlushTelemetry(uint8_t budget);
+	void PublishSampleOutsideIRQ();
+
+	void TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, uint32_t control_us, uint32_t output_us,
+			  const float motor_norm[MOTOR_COUNT], const ActuatorWriteResult &write_result);
+	bool ReadSampleDirect(const hrt_abstime &timestamp_sample);
+	static void ControlLoopTrampoline(void *arg);
+	void ControlLoopIRQ();
+	void StartControlLoopIRQ();
+	void StopControlLoopIRQ();
+
 };
