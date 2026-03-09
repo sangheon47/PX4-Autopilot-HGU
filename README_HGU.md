@@ -3,9 +3,6 @@
 이 브랜치는 CUAV 7-Nano에서 `IIM42652` 드라이버 기반 직접 실시간 루프를
 돌리기 위해 필요한 최소 PX4 변경만 포함합니다.
 
-아래 예시는 이 저장소를 새로 clone해서 `origin`이
-`PX4-Autopilot-HGU`를 가리키는 일반적인 경우를 기준으로 적었습니다.
-
 ## 포함된 변경 사항
 
 - CUAV 7-Nano에서 `iim42652`를 활성화하고 사용하지 않는 내장 IMU를 비활성화함
@@ -46,6 +43,38 @@ build/cuav_7-nano_default/cuav_7-nano_default.px4
 ```bash
 make cuav_7-nano_default
 ```
+
+## VS Code 빨간 줄 정리
+
+`IIM42652.cpp`, `IIM42652.hpp` 같은 PX4 보드 전용 파일은 에디터가 실제
+빌드 설정을 못 읽으면 빨간 줄이 남을 수 있습니다. 이 저장소는 기본적으로
+`cuav_7-nano_default` 기준으로 맞춰져 있습니다.
+
+처음 한 번은 아래 순서로 맞추는 것이 좋습니다.
+
+```bash
+make cuav_7-nano_default
+ln -sfn build/cuav_7-nano_default/compile_commands.json compile_commands.json
+```
+
+그 다음 VS Code에서 아래를 실행합니다.
+
+1. `CMake: Select Variant` -> `cuav_7-nano_default`
+2. `CMake: Delete Cache and Reconfigure`
+3. `C/C++: Reset IntelliSense Database`
+4. `Developer: Reload Window`
+
+실제 오류 확인은 아래 둘 중 하나로 합니다.
+
+```bash
+make cuav_7-nano_default
+make cuav_7-nano_default upload
+```
+
+또는 VS Code에서 `Run Task`로 아래 task를 실행하면 됩니다.
+
+- `cuav_7-nano build check`
+- `cuav_7-nano upload`
 
 ## 업로드
 
@@ -174,14 +203,14 @@ git pull --ff-only
 ```bash
 git switch team
 git pull --ff-only
-git switch -c temp/my-experiment
+git switch -c temp
 ```
 
 정리 후 다시 `team`에 반영:
 
 ```bash
 git switch team
-git merge temp/my-experiment
+git merge temp
 git push origin team
 ```
 
