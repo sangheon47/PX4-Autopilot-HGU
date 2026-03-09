@@ -11,12 +11,16 @@ PX4 포크입니다.
 즉 평소 작업은 거의 전부 `team`에서 하고, `share`는 꼭 필요할 때만 기준점으로
 남겨두는 방식입니다.
 
+아래 예시는 이 저장소를 새로 clone해서 `origin`이
+`PX4-Autopilot-HGU`를 가리키는 일반적인 경우를 기준으로 적었습니다.
+
 ## 빠른 시작
 
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch team
+# 현재 브랜치가 team이 아니라면 아래 줄 실행
+# git switch --track origin/team
 make cuav_7-nano_default
 ```
 

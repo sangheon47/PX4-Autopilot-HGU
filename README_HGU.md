@@ -3,6 +3,9 @@
 이 브랜치는 CUAV 7-Nano에서 `IIM42652` 드라이버 기반 직접 실시간 루프를
 돌리기 위해 필요한 최소 PX4 변경만 포함합니다.
 
+아래 예시는 이 저장소를 새로 clone해서 `origin`이
+`PX4-Autopilot-HGU`를 가리키는 일반적인 경우를 기준으로 적었습니다.
+
 ## 포함된 변경 사항
 
 - CUAV 7-Nano에서 `iim42652`를 활성화하고 사용하지 않는 내장 IMU를 비활성화함
@@ -17,7 +20,8 @@
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch team
+# 현재 브랜치가 team이 아니라면 아래 줄 실행
+# git switch --track origin/team
 make cuav_7-nano_default
 ```
 
@@ -122,16 +126,8 @@ iim42652 status
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch team
-git pull --ff-only
-```
-
-현재 저장소처럼 `px4fork` remote를 따로 두고 쓰는 경우에는 아래처럼 시작하면
-됩니다.
-
-```bash
-git fetch px4fork
-git switch team
+# 현재 브랜치가 team이 아니라면 아래 줄 실행
+# git switch --track origin/team
 git pull --ff-only
 ```
 
@@ -148,7 +144,8 @@ git pull --ff-only
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch team
+# 현재 브랜치가 team이 아니라면 아래 줄 실행
+# git switch --track origin/team
 git pull --ff-only
 ```
 
@@ -156,7 +153,7 @@ git pull --ff-only
 
 ```bash
 git add <files>
-git commit -m "..."
+git commit -m "원하는 커밋 메세지"
 git push origin team
 ```
 
@@ -193,10 +190,10 @@ git push origin team
 `team`이 충분히 안정화되어 별도 기준점을 남기고 싶을 때만:
 
 ```bash
-git fetch px4fork
+git fetch origin
 git switch share
-git merge --ff-only px4fork/team
-git push px4fork share
+git merge --ff-only origin/team
+git push origin share
 git switch team
 ```
 
@@ -222,7 +219,8 @@ git switch team
 ```bash
 git clone git@github.com:<their-account>/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch team
+# 현재 브랜치가 team이 아니라면 아래 줄 실행
+# git switch --track origin/team
 ```
 
 ## 참고
