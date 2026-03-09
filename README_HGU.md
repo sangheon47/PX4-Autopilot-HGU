@@ -107,81 +107,88 @@ iim42652 status
 
 ## 권장 브랜치 구조
 
-짧은 브랜치 이름 3개만 쓰는 것을 권장합니다.
+기본 운영은 짧은 브랜치 이름 2개만 쓰는 것을 권장합니다.
 
 - `share`: 외부 공유 및 재현용 기준 브랜치
-- `team`: 팀이 함께 쓰는 공용 원격 브랜치
-- `local`: 개인 작업 브랜치
+- `team`: 팀이 함께 쓰는 공용 작업 브랜치
 
-이 포크를 직접 clone 했다면 기본 설정은 이렇게 시작하면 됩니다.
+즉 평소에는 `share + team`만 사용하고, 개인 실험이 꼭 필요할 때만 임시
+브랜치를 잠깐 만들어 쓰는 방식이 가장 단순합니다.
 
-```bash
-git switch share
-git switch -c local
-```
+## 팀 작업 시작
 
-현재 저장소처럼 `px4fork` remote를 별도로 두고 쓰는 경우에는 아래처럼
-시작하면 됩니다.
-
-```bash
-git fetch px4fork
-git switch -c local px4fork/team
-```
-
-기본 흐름:
-
-1. `local`에서 개인 작업
-2. 테스트가 끝난 변경을 공용 원격 `team`에 반영
-3. 안정화된 `team`을 `share`로 승격
-
-## 팀원 협업 흐름
-
-팀원도 같은 포크와 같은 짧은 브랜치 이름을 쓰면 됩니다.
+이 포크를 직접 clone 했다면 보통 이렇게 시작하면 됩니다.
 
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch share
-git switch -c local
-```
-
-팀원은 `local`에서 작업하고, 빌드가 되는 상태가 되면 공용 원격 `team`에
-반영합니다.
-
-```bash
-git fetch origin
-git switch local
-git merge origin/team
-git push origin HEAD:team
-```
-
-## 팀원 변경을 내 로컬에 가져오기
-
-팀원이 `team`에 새 커밋을 올렸다면, 내 `local`은 아래처럼 갱신하면 됩니다.
-
-```bash
-git fetch px4fork
-git switch local
-git merge px4fork/team
-```
-
-만약 내 `local`이 별도 커밋 없이 `team`만 따라가고 있다면 이것도 가능합니다.
-
-```bash
-git switch local
+git switch team
 git pull --ff-only
 ```
 
-## 검증된 변경 반영
-
-내 `local` 작업을 팀에 반영할 때:
+현재 저장소처럼 `px4fork` remote를 따로 두고 쓰는 경우에는 아래처럼 시작하면
+됩니다.
 
 ```bash
 git fetch px4fork
-git switch local
-git merge px4fork/team
-git push px4fork HEAD:team
+git switch team
+git pull --ff-only
 ```
+
+기본 흐름:
+
+1. `team`에서 작업
+2. 커밋 후 `team`에 push
+3. 충분히 안정화되면 `share`로 승격
+
+## 팀원 협업 흐름
+
+팀원도 같은 저장소를 clone 한 뒤 `team`에서 바로 작업하면 됩니다.
+
+```bash
+git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
+cd PX4-Autopilot-HGU
+git switch team
+git pull --ff-only
+```
+
+작업 후 반영:
+
+```bash
+git add <files>
+git commit -m "..."
+git push origin team
+```
+
+## 팀원 변경 받아오기
+
+다른 팀원이 `team`에 새 커밋을 올렸다면, 아래처럼 받아오면 됩니다.
+
+```bash
+git switch team
+git pull --ff-only
+```
+
+## 임시 브랜치가 필요할 때
+
+개인 실험을 `team`에 바로 올리고 싶지 않다면, 그때만 임시 브랜치를 만들면
+됩니다.
+
+```bash
+git switch team
+git pull --ff-only
+git switch -c temp/my-experiment
+```
+
+정리 후 다시 `team`에 반영:
+
+```bash
+git switch team
+git merge temp/my-experiment
+git push origin team
+```
+
+## 검증된 변경 반영
 
 `team`이 충분히 안정화되어 외부 공유 기준으로 올리고 싶을 때:
 
@@ -190,6 +197,7 @@ git fetch px4fork
 git switch share
 git merge --ff-only px4fork/team
 git push px4fork share
+git switch team
 ```
 
 ## 다른 프로젝트나 다른 팀에서 재사용할 때
@@ -200,27 +208,26 @@ git push px4fork share
 다른 팀 권장 구조:
 
 - `share`: 그 팀의 안정 기준 브랜치
-- `team`: 그 팀의 통합 브랜치
-- `local`: 각 개발자의 개인 작업 브랜치
+- `team`: 그 팀의 공용 작업 브랜치
+- 필요하면 임시 브랜치만 추가 사용
 
 즉 구조는 이렇게 됩니다.
 
-- 이 저장소는 이 저장소의 `share`, `team`, `local`을 유지
+- 이 저장소는 이 저장소의 `share`, `team`을 유지
 - 다른 팀은 자기들 fork를 새로 생성
-- 그 fork 안에서 자기들만의 `share`, `team`, `local`을 운영
+- 그 fork 안에서 자기들만의 `share`, `team`을 운영
 
 다른 팀 예시 시작 절차:
 
 ```bash
 git clone git@github.com:<their-account>/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch share
-git switch -c local
+git switch team
 ```
 
 ## 참고
 
 - 텔레메트리 큐는 single-producer single-consumer 구조로 구현되어 있어 IRQ
   루프와 non-IRQ flush 경로가 경쟁하지 않도록 되어 있습니다.
-- `share`는 깨끗하게 유지하고, 협업은 `team`, 실험은 `local`에서 하는 것을
+- `share`는 깨끗하게 유지하고, 평소 작업은 `team`에서 진행하는 것을
   권장합니다.
