@@ -35,21 +35,11 @@ void rt_controller(const float accel_m_s2[3],
 	assert(motor_norm_out != NULL);
 
 	// Body-frame accelerometer axes [m/s^2]: X, Y, Z.
-	const float accel_x_m_s2 = accel_m_s2[0];
-	const float accel_y_m_s2 = accel_m_s2[1];
-	const float accel_z_m_s2 = accel_m_s2[2];
+	// accel_m_s2[0], accel_m_s2[1], accel_m_s2[2]
 
 	// Body-frame gyroscope axes [rad/s]: X(roll), Y(pitch), Z(yaw).
-	const float gyro_x_rad_s = gyro_rad_s[0];
-	const float gyro_y_rad_s = gyro_rad_s[1];
-	const float gyro_z_rad_s = gyro_rad_s[2];
+	// gyro_rad_s[0], gyro_rad_s[1], gyro_rad_s[2]
 
-	(void)accel_x_m_s2;
-	(void)accel_y_m_s2;
-	(void)accel_z_m_s2;
-	(void)gyro_x_rad_s;
-	(void)gyro_y_rad_s;
-	(void)gyro_z_rad_s;
 
 	// Normalized actuator commands [0..1]:
 	// Servo1..Servo4 and BLDC1..BLDC2.
