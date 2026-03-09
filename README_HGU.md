@@ -110,7 +110,7 @@ iim42652 status
 짧은 브랜치 이름 3개만 쓰는 것을 권장합니다.
 
 - `share`: 외부 공유 및 재현용 기준 브랜치
-- `team`: 팀 통합 브랜치
+- `team`: 팀이 함께 쓰는 공용 원격 브랜치
 - `local`: 개인 작업 브랜치
 
 이 포크를 직접 clone 했다면 기본 설정은 이렇게 시작하면 됩니다.
@@ -121,19 +121,17 @@ git switch -c local
 ```
 
 현재 저장소처럼 `px4fork` remote를 별도로 두고 쓰는 경우에는 아래처럼
-맞추면 됩니다.
+시작하면 됩니다.
 
 ```bash
 git fetch px4fork
-git switch -c share px4fork/share
-git switch -c team px4fork/team
 git switch -c local px4fork/team
 ```
 
 기본 흐름:
 
 1. `local`에서 개인 작업
-2. 테스트가 끝난 변경을 `team`에 반영
+2. 테스트가 끝난 변경을 공용 원격 `team`에 반영
 3. 안정화된 `team`을 `share`로 승격
 
 ## 팀원 협업 흐름
@@ -143,16 +141,18 @@ git switch -c local px4fork/team
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch -c team origin/team
+git switch share
 git switch -c local
 ```
 
-팀원은 `local`에서 작업하고, 빌드가 되는 상태가 되면 `team`에 반영합니다.
+팀원은 `local`에서 작업하고, 빌드가 되는 상태가 되면 공용 원격 `team`에
+반영합니다.
 
 ```bash
-git switch team
-git merge local
-git push origin team
+git fetch origin
+git switch local
+git merge origin/team
+git push origin HEAD:team
 ```
 
 ## 팀원 변경을 내 로컬에 가져오기
@@ -177,19 +177,19 @@ git pull --ff-only
 내 `local` 작업을 팀에 반영할 때:
 
 ```bash
-git switch team
-git merge local
-git push px4fork team
+git fetch px4fork
 git switch local
+git merge px4fork/team
+git push px4fork HEAD:team
 ```
 
 `team`이 충분히 안정화되어 외부 공유 기준으로 올리고 싶을 때:
 
 ```bash
+git fetch px4fork
 git switch share
-git merge --ff-only team
+git merge --ff-only px4fork/team
 git push px4fork share
-git switch local
 ```
 
 ## 다른 프로젝트나 다른 팀에서 재사용할 때
@@ -209,10 +209,6 @@ git switch local
 - 다른 팀은 자기들 fork를 새로 생성
 - 그 fork 안에서 자기들만의 `share`, `team`, `local`을 운영
 
-관련 없는 다른 팀이 네 `team` 브랜치에 직접 push 하도록 하지 않는 것이
-좋습니다. 네 `share`는 공개 기준점으로 두고, 다른 팀은 자기 fork에서
-가지치기해서 쓰는 방식이 가장 깔끔합니다.
-
 다른 팀 예시 시작 절차:
 
 ```bash
@@ -224,7 +220,6 @@ git switch -c local
 
 ## 참고
 
-- 현재 `rt_controller()`는 고정된 normalized 출력을 내보내는 stub 제어기입니다.
 - 텔레메트리 큐는 single-producer single-consumer 구조로 구현되어 있어 IRQ
   루프와 non-IRQ flush 경로가 경쟁하지 않도록 되어 있습니다.
 - `share`는 깨끗하게 유지하고, 협업은 `team`, 실험은 `local`에서 하는 것을
