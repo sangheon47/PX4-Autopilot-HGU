@@ -1,5 +1,5 @@
 CONFIG:
-  default: px4_sitl_default
+  default: cuav_7-nano_default
   choices:
     px4_sitl_default:
       short: px4_sitl_default

@@ -4,6 +4,43 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "cuav_7-nano build check",
+            "type": "shell",
+            "command": "make cuav_7-nano_default",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "revealProblems": "onProblem",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            }
+        },
+        {
+            "label": "cuav_7-nano upload",
+            "type": "shell",
+            "command": "make cuav_7-nano_default upload",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "revealProblems": "onProblem",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            }
+        },
+        {
             "label": "build",
             "type": "shell",
             "command": "/bin/bash",

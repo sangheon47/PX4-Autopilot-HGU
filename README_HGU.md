@@ -198,19 +198,19 @@ git pull --ff-only
 ## 임시 브랜치가 필요할 때
 
 개인 실험을 `team`에 바로 올리고 싶지 않다면, 그때만 임시 브랜치를 만들면
-됩니다.
+됩니다. 이름은 `temp1`, `temp2`처럼 새 번호를 붙여서 사용하면 됩니다.
 
 ```bash
 git switch team
 git pull --ff-only
-git switch -c temp
+git switch -c temp1
 ```
 
 정리 후 다시 `team`에 반영:
 
 ```bash
 git switch team
-git merge temp
+git merge temp1
 git push origin team
 ```
 
