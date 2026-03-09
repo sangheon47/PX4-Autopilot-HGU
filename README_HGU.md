@@ -17,7 +17,7 @@
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch share
+git switch team
 make cuav_7-nano_default
 ```
 
@@ -109,11 +109,11 @@ iim42652 status
 
 기본 운영은 짧은 브랜치 이름 2개만 쓰는 것을 권장합니다.
 
-- `share`: 외부 공유 및 재현용 기준 브랜치
-- `team`: 팀이 함께 쓰는 공용 작업 브랜치
+- `team`: 팀이 함께 쓰는 메인 작업 브랜치
+- `share`: 필요할 때만 남겨두는 보존용 기준 브랜치
 
-즉 평소에는 `share + team`만 사용하고, 개인 실험이 꼭 필요할 때만 임시
-브랜치를 잠깐 만들어 쓰는 방식이 가장 단순합니다.
+즉 평소에는 거의 전부 `team`에서 작업하고, `share`는 꼭 필요할 때만 유지하는
+방식이 가장 단순합니다.
 
 ## 팀 작업 시작
 
@@ -139,7 +139,7 @@ git pull --ff-only
 
 1. `team`에서 작업
 2. 커밋 후 `team`에 push
-3. 충분히 안정화되면 `share`로 승격
+3. 정말 기준점을 남겨야 할 때만 `share` 갱신
 
 ## 팀원 협업 흐름
 
@@ -190,7 +190,7 @@ git push origin team
 
 ## 검증된 변경 반영
 
-`team`이 충분히 안정화되어 외부 공유 기준으로 올리고 싶을 때:
+`team`이 충분히 안정화되어 별도 기준점을 남기고 싶을 때만:
 
 ```bash
 git fetch px4fork
@@ -207,8 +207,8 @@ git switch team
 
 다른 팀 권장 구조:
 
-- `share`: 그 팀의 안정 기준 브랜치
-- `team`: 그 팀의 공용 작업 브랜치
+- `team`: 그 팀의 메인 작업 브랜치
+- `share`: 그 팀이 필요할 때만 남겨두는 기준 브랜치
 - 필요하면 임시 브랜치만 추가 사용
 
 즉 구조는 이렇게 됩니다.
@@ -229,5 +229,5 @@ git switch team
 
 - 텔레메트리 큐는 single-producer single-consumer 구조로 구현되어 있어 IRQ
   루프와 non-IRQ flush 경로가 경쟁하지 않도록 되어 있습니다.
-- `share`는 깨끗하게 유지하고, 평소 작업은 `team`에서 진행하는 것을
-  권장합니다.
+- 평소 작업은 `team`에서 직접 진행하고, `share`는 꼭 필요할 때만 갱신하는
+  것을 권장합니다.

@@ -3,21 +3,20 @@
 이 저장소는 `CUAV 7-Nano + IIM42652` 직접 실시간 루프 실험을 위해 정리한
 PX4 포크입니다.
 
-기본 브랜치는 `share`이며, 현재 이 저장소에서는 아래 2개 브랜치 구조를
-기준으로 사용합니다.
+현재 이 저장소에서는 아래 2개 브랜치 구조를 기준으로 사용합니다.
 
-- `share`: 외부 공유 및 재현용 기준 브랜치
-- `team`: 팀이 함께 쓰는 공용 원격 브랜치
+- `team`: 팀이 함께 쓰는 메인 작업 브랜치
+- `share`: 필요할 때만 남겨두는 보존용 기준 브랜치
 
-필요하면 개인 실험용 임시 브랜치를 잠깐 만들어 쓸 수 있지만, 기본 운영은
-`share + team`만 사용합니다.
+즉 평소 작업은 거의 전부 `team`에서 하고, `share`는 꼭 필요할 때만 기준점으로
+남겨두는 방식입니다.
 
 ## 빠른 시작
 
 ```bash
 git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
 cd PX4-Autopilot-HGU
-git switch share
+git switch team
 make cuav_7-nano_default
 ```
 
