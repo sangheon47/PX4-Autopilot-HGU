@@ -135,7 +135,7 @@ extern "C" int iim42652_main(int argc, char *argv[])
 
 		if (!strcmp(subcommand, "status")) {
 			cli.custom1 = ThisDriver::CLI_CUSTOM_BLDC_STATUS;
-			return ThisDriver::module_custom_method(cli, iterator);
+			return ThisDriver::module_custom_method(cli, iterator, false);
 		}
 
 		if (!strcmp(subcommand, "set")) {
