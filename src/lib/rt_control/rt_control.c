@@ -43,12 +43,12 @@ void rt_controller(const float accel_m_s2[3],
 
 	// Normalized actuator commands [0..1]:
 	// Servo1..Servo4 and BLDC1..BLDC2.
-	const float servo1_norm = 0.7f;
-	const float servo2_norm = 0.7f;
-	const float servo3_norm = 0.7f;
-	const float servo4_norm = 0.7f;
-	const float bldc1_norm = 0.7f;
-	const float bldc2_norm = 0.7f;
+	const float servo1_norm = 0.5f;
+	const float servo2_norm = 0.5f;
+	const float servo3_norm = 0.5f;
+	const float servo4_norm = 0.5f;
+	const float bldc1_norm = 0.1f;
+	const float bldc2_norm = 0.1f;
 
 	motor_norm_out[0] = servo1_norm; // Servo1
 	motor_norm_out[1] = servo2_norm; // Servo2

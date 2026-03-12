@@ -475,9 +475,11 @@ else
 	else
 		commander start
 
-		dshot start
-		# pwm_out start
-	fi
+			# iim42652 directly initializes and drives DShot outputs 5-6.
+			# Keep the standard dshot module off to avoid output ownership conflicts.
+			# dshot start
+			# pwm_out start
+		fi
 
 	#
 	# Optional UAVCAN/DroneCAN or Cyphal

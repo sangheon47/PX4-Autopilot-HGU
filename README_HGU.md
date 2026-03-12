@@ -8,9 +8,12 @@
 - CUAV 7-Nano에서 `iim42652`를 활성화하고 사용하지 않는 내장 IMU를 비활성화함
 - 부팅 시 보드 센서 초기화 스크립트에서 `iim42652`를 시작함
 - 드라이버가 PWM/DSHOT 출력을 직접 쓰도록 기본 `pwm_out` 시작을 막음
+- 표준 `dshot start`를 비활성화하고 `iim42652`가 DShot 출력 5-6을 직접 소유하도록 정리함
 - `IIM42652` 내부에 200 Hz 실시간 루프를 추가함
 - 제어기 코드를 `src/lib/rt_control/`로 분리함
 - UDP 텔레메트리 큐와 상태 출력 기능을 추가함
+- `iim42652 motor auto|stop|status|set <0..1>` 콘솔 명령을 추가함
+- DShot startup hold와 기본 `stop` 모드를 추가함
 
 ## 빠른 시작
 
@@ -94,8 +97,16 @@ make cuav_7-nano_default upload
 iim42652 -s -R 22 start
 ```
 
-`rcS`에서는 기본 `pwm_out start`가 주석 처리되어 있고, `DSHOT`은 계속 PX4가
-시작합니다.
+이후 `IIM42652::InitActuatorDirect()`가 아래를 직접 수행합니다.
+
+- Servo 출력 1-4 초기화
+- DShot 출력 5-6 초기화 및 arm
+- `motor_stop` 전송
+- 약 3초 startup hold 시작
+
+현재 `rcS`에서는 표준 `dshot start`를 비활성화해 두었습니다. `iim42652`와 표준
+`dshot`가 동시에 같은 출력 자원을 잡으면 콘솔 명령이 먹지 않는 상태가 생길 수
+있기 때문입니다.
 
 ## 실시간 루프 경로
 
@@ -122,6 +133,44 @@ iim42652 -s -R 22 start
 - Servo 출력: 채널 1-4
 - BLDC DSHOT 출력: 채널 5-6
 
+## 수동 BLDC 제어
+
+MAVLink Console 또는 NSH 셸에서 아래 명령을 사용합니다.
+
+```bash
+iim42652 motor status
+iim42652 motor stop
+iim42652 motor set 0.03
+iim42652 motor set 0.05
+iim42652 motor set 0.10
+iim42652 motor auto
+```
+
+의미:
+
+- `status`: 현재 BLDC 모드와 수동 설정값 확인
+- `stop`: BLDC 즉시 정지
+- `set <0..1>`: BLDC를 지정 출력으로 고정
+- `auto`: `rt_controller()` 출력으로 복귀
+
+권장 시험 순서:
+
+```bash
+iim42652 motor status
+iim42652 motor set 0.03
+# 필요하면 0.05, 0.10 등으로 증가
+iim42652 motor stop
+```
+
+## BLDC 모드 의미
+
+- `stop`: BLDC에 `motor_stop`을 보냄
+- `set`: 지정한 수동 출력값을 사용
+- `auto`: `rt_controller()`가 만든 BLDC 값을 그대로 사용
+
+현재 `src/lib/rt_control/rt_control.c`에서는 BLDC 출력이 `0.5`, `0.5`로
+고정되어 있으므로, 지금의 `auto`는 사실상 50% 고정 출력처럼 동작합니다.
+
 ## 부팅 후 확인
 
 NSH 셸에서 아래 명령으로 확인합니다.
@@ -133,10 +182,21 @@ iim42652 status
 출력에서 보게 되는 주요 항목:
 
 - `RT period_us=5000`
+- `manual_mode`
+- `manual`
+- `hold_active`
 - cycle 카운터
 - input/control/output/exec 시간
 - 가속도/자이로 값
 - PWM/DSHOT 출력 값
+
+상태 확인 팁:
+
+- 수동 제어 상태 확인은 `iim42652 motor status`가 가장 직접적입니다.
+- `iim42652 status`의 `manual_mode`, `manual`, `bldc_dshot`도 참고할 수 있습니다.
+- 현재 `iim42652 status`의 BLDC 퍼센트 표시는 최종 override 출력과 완전히
+  일치하지 않을 수 있으므로, 수동 출력 확인은 `motor status`와 실제
+  `bldc_dshot` 값을 함께 보는 편이 낫습니다.
 
 ## 권장 브랜치 구조
 

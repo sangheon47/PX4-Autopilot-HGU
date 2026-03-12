@@ -33,6 +33,48 @@ build/cuav_7-nano_default/cuav_7-nano_default.px4
 iim42652 status
 ```
 
+## 현재 출력 구조
+
+- `iim42652`는 부팅 시 `boards/cuav/7-nano/init/rc.board_sensors`에서 자동 시작됩니다.
+- `iim42652` 드라이버가 Servo 출력 1-4와 BLDC DShot 출력 5-6을 직접 초기화하고 제어합니다.
+- `ROMFS/px4fmu_common/init.d/rcS`의 표준 `dshot start`는 출력 소유권 충돌을 막기 위해 비활성화되어 있습니다.
+- BLDC는 기본 모드가 `stop`이며, 드라이버 시작 직후 약 3초 동안 startup hold가 걸립니다.
+
+## MAVLink Console 수동 BLDC 제어
+
+MAVLink Console 또는 NSH 셸에서 아래 명령으로 BLDC(DShot, 채널 5-6)를 수동 제어할 수 있습니다.
+
+```bash
+iim42652 motor status
+iim42652 motor stop
+iim42652 motor set 0.03
+iim42652 motor set 0.05
+iim42652 motor set 0.10
+iim42652 motor auto
+```
+
+의미:
+
+- `iim42652 motor status`: 현재 모드와 수동 설정값 확인
+- `iim42652 motor stop`: BLDC 강제 정지
+- `iim42652 motor set <0..1>`: BLDC를 지정 출력으로 고정
+- `iim42652 motor auto`: `rt_controller()` 출력으로 복귀
+
+권장 시험 순서:
+
+```bash
+iim42652 motor status
+iim42652 motor set 0.03
+# 필요하면 0.05, 0.10 등으로 증가
+iim42652 motor stop
+```
+
+추가 메모:
+
+- `auto`는 `rt_controller()`가 만든 값을 그대로 사용합니다.
+- 현재 `src/lib/rt_control/rt_control.c`에서는 BLDC 출력이 `0.5`, `0.5`로 고정되어 있어 `auto`는 사실상 50% 고정 출력처럼 동작합니다.
+- `iim42652 status`의 `manual_mode`, `manual`, `bldc_dshot`는 참고할 수 있지만, BLDC 퍼센트 표시는 현재 최종 override 출력과 완전히 일치하지 않을 수 있습니다.
+
 ## 자세한 문서
 
 실시간 루프 구조, 수정 포인트, 협업 방식, 다른 팀이 fork해서 쓰는 구조는 아래

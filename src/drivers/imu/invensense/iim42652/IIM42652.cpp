@@ -154,6 +154,37 @@ void IIM42652::print_status()
 		 (unsigned)CONTROL_PERIOD_US,
 		 (double)(1000000.0 / (double)CONTROL_PERIOD_US));
 
+	const hrt_abstime now = hrt_absolute_time();
+	const bool dshot_hold_active = _dshot_initialized && now < _dshot_startup_hold_until;
+	const unsigned long dshot_hold_remaining_ms = dshot_hold_active
+			? (unsigned long)((_dshot_startup_hold_until - now) / 1000)
+			: 0UL;
+	const uint16_t manual_norm_milli = _bldc_manual_norm_milli.load();
+
+	const char *manual_mode = "unknown";
+
+	switch (static_cast<BldcManualMode>(_bldc_manual_mode.load())) {
+	case BldcManualMode::Auto:
+		manual_mode = "auto";
+		break;
+
+	case BldcManualMode::Stop:
+		manual_mode = "stop";
+		break;
+
+	case BldcManualMode::Set:
+		manual_mode = "set";
+		break;
+	}
+
+	PX4_INFO("RT dshot initialized=%s hold_active=%s hold_remaining_ms=%lu mask=0x%lx manual_mode=%s manual=%.3f",
+		 _dshot_initialized ? "true" : "false",
+		 dshot_hold_active ? "true" : "false",
+		 dshot_hold_remaining_ms,
+		 (unsigned long)_dshot_mask,
+		 manual_mode,
+		 (double)manual_norm_milli / 1000.0);
+
 	if (_last_frame.cycle == 0) {
 		PX4_INFO("RT no cycle yet");
 		return;
@@ -197,6 +228,68 @@ void IIM42652::print_status()
 		 (unsigned long)perf_event_count(_bad_register_perf),
 		 (unsigned)_failure_count,
 		 (unsigned long)_last_frame.missed_cycles);
+}
+
+void IIM42652::custom_method(const BusCLIArguments &cli)
+{
+	switch (cli.custom1) {
+	case CLI_CUSTOM_BLDC_AUTO:
+		_bldc_manual_mode.store(static_cast<uint8_t>(BldcManualMode::Auto));
+		PX4_INFO("BLDC control mode: auto");
+		break;
+
+	case CLI_CUSTOM_BLDC_STOP:
+		_bldc_manual_mode.store(static_cast<uint8_t>(BldcManualMode::Stop));
+
+		if (_dshot_initialized) {
+			for (int i = 0; i < BLDC_COUNT; ++i) {
+				up_dshot_motor_command(SERVO_COUNT + i, DShot_cmd_motor_stop, false);
+			}
+
+			up_dshot_trigger();
+		}
+
+		PX4_INFO("BLDC control mode: stop");
+		break;
+
+	case CLI_CUSTOM_BLDC_SET:
+		_bldc_manual_norm_milli.store(math::min(cli.custom2, 1000));
+		_bldc_manual_mode.store(static_cast<uint8_t>(BldcManualMode::Set));
+		PX4_INFO("BLDC control mode: set %.1f%%",
+			 (double)_bldc_manual_norm_milli.load() * 0.1);
+		break;
+
+	case CLI_CUSTOM_BLDC_STATUS:
+	default:
+		break;
+	}
+
+	const hrt_abstime now = hrt_absolute_time();
+	const bool dshot_hold_active = _dshot_initialized && now < _dshot_startup_hold_until;
+	const uint16_t manual_norm_milli = _bldc_manual_norm_milli.load();
+
+	const char *manual_mode = "unknown";
+
+	switch (static_cast<BldcManualMode>(_bldc_manual_mode.load())) {
+	case BldcManualMode::Auto:
+		manual_mode = "auto";
+		break;
+
+	case BldcManualMode::Stop:
+		manual_mode = "stop";
+		break;
+
+	case BldcManualMode::Set:
+		manual_mode = "set";
+		break;
+	}
+
+	PX4_INFO("BLDC status: mode=%s manual=%.3f dshot_initialized=%s hold_active=%s hold_remaining_ms=%lu",
+		 manual_mode,
+		 (double)manual_norm_milli / 1000.0,
+		 _dshot_initialized ? "true" : "false",
+		 dshot_hold_active ? "true" : "false",
+		 dshot_hold_active ? (unsigned long)((_dshot_startup_hold_until - now) / 1000) : 0UL);
 }
 
 int IIM42652::probe()
@@ -1198,6 +1291,10 @@ void IIM42652::TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, 
 
 void IIM42652::WriteStep(const float motor_norm[MOTOR_COUNT], ActuatorWriteResult &out)
 {
+	const bool dshot_hold_active = _dshot_initialized && hrt_absolute_time() < _dshot_startup_hold_until;
+	const BldcManualMode manual_mode = static_cast<BldcManualMode>(_bldc_manual_mode.load());
+	const float manual_u = math::constrain((float)_bldc_manual_norm_milli.load() / 1000.f, 0.f, 1.f);
+
 	for (int i = 0; i < SERVO_COUNT; i++) {
 		const float u = math::constrain(motor_norm[i], 0.f, 1.f);
 		const uint16_t pwm = PWM_MIN_US + static_cast<uint16_t>(u * (PWM_MAX_US - PWM_MIN_US));
@@ -1207,12 +1304,32 @@ void IIM42652::WriteStep(const float motor_norm[MOTOR_COUNT], ActuatorWriteResul
 	up_pwm_update(_servo_mask);
 
 	for (int i = 0; i < BLDC_COUNT; i++) {
-		const float u = math::constrain(motor_norm[SERVO_COUNT + i], 0.f, 1.f);
-		const uint16_t dshot_throttle = static_cast<uint16_t>(u * DSHOT_THROTTLE_MAX);
+		float u = math::constrain(motor_norm[SERVO_COUNT + i], 0.f, 1.f);
+
+		switch (manual_mode) {
+		case BldcManualMode::Auto:
+			break;
+
+		case BldcManualMode::Stop:
+			u = 0.f;
+			break;
+
+		case BldcManualMode::Set:
+			u = manual_u;
+			break;
+		}
+
+		const bool send_motor_stop = dshot_hold_active || (u <= 0.f);
+		const uint16_t dshot_throttle = send_motor_stop ? 0U : static_cast<uint16_t>(u * DSHOT_THROTTLE_MAX);
 		out.bldc_dshot[i] = dshot_throttle;
 
 		if (_dshot_initialized) {
-			up_dshot_motor_data_set(SERVO_COUNT + i, dshot_throttle, false);
+			if (send_motor_stop) {
+				up_dshot_motor_command(SERVO_COUNT + i, DShot_cmd_motor_stop, false);
+
+			} else {
+				up_dshot_motor_data_set(SERVO_COUNT + i, dshot_throttle, false);
+			}
 		}
 	}
 
@@ -1306,6 +1423,12 @@ bool IIM42652::InitActuatorDirect()
 		return false;
 	}
 
+	for (int i = 0; i < BLDC_COUNT; ++i) {
+		up_dshot_motor_command(SERVO_COUNT + i, DShot_cmd_motor_stop, false);
+	}
+
+	up_dshot_trigger();
+	_dshot_startup_hold_until = hrt_absolute_time() + DSHOT_STARTUP_HOLD_US;
 	_dshot_initialized = true;
 	return true;
 }
@@ -1315,6 +1438,7 @@ void IIM42652::DeinitActuatorDirect()
 	if (_dshot_initialized) {
 		up_dshot_arm(false);
 		_dshot_initialized = false;
+		_dshot_startup_hold_until = 0;
 	}
 
 	if (_pwm_initialized) {

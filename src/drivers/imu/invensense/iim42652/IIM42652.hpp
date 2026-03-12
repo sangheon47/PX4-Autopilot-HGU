@@ -60,6 +60,11 @@ using namespace InvenSense_IIM42652;
 class IIM42652 : public device::SPI, public I2CSPIDriver<IIM42652>
 {
 public:
+	static constexpr uint8_t CLI_CUSTOM_BLDC_AUTO{1};
+	static constexpr uint8_t CLI_CUSTOM_BLDC_STOP{2};
+	static constexpr uint8_t CLI_CUSTOM_BLDC_SET{3};
+	static constexpr uint8_t CLI_CUSTOM_BLDC_STATUS{4};
+
 	IIM42652(const I2CSPIDriverConfig &config);
 	~IIM42652() override;
 
@@ -71,6 +76,7 @@ public:
 	void print_status() override;
 
 private:
+	void custom_method(const BusCLIArguments &cli) override;
 	void exit_and_cleanup() override;
 
 	// Sensor Configuration
@@ -234,6 +240,13 @@ private:
 	static constexpr uint16_t CONTROL_PERIOD_US{5000}; // 200 Hz
 	static constexpr uint16_t DSHOT_THROTTLE_MAX{1999};
 	static constexpr unsigned DSHOT_PWM_RATE{600000U}; // DSHOT600
+	static constexpr hrt_abstime DSHOT_STARTUP_HOLD_US{3'000'000};
+
+	enum class BldcManualMode : uint8_t {
+		Auto = 0,
+		Stop,
+		Set
+	};
 
 	using TelemetryFrame = rt_control_telemetry_frame_t;
 	rt_control_queue_t _tx_q{};
@@ -256,6 +269,9 @@ private:
 	bool _dshot_initialized{false};
 	uint32_t _servo_mask{(1u << SERVO_COUNT) - 1};
 	uint32_t _dshot_mask{(1u << 4) | (1u << 5)};
+	hrt_abstime _dshot_startup_hold_until{0};
+	px4::atomic<uint8_t> _bldc_manual_mode{static_cast<uint8_t>(BldcManualMode::Stop)};
+	px4::atomic<uint16_t> _bldc_manual_norm_milli{0};
 
 	int _udp_fd{-1};
 	uint32_t _telem_ip{0}; // network byte order
