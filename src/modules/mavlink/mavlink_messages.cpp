@@ -152,6 +152,7 @@
 # include "streams/LINK_NODE_STATUS.hpp"
 # include "streams/NAMED_VALUE_FLOAT.hpp"
 # include "streams/ODOMETRY.hpp"
+# include "streams/RT_CONTROL_TELEMETRY.hpp"
 # include "streams/SCALED_PRESSURE2.hpp"
 # include "streams/SCALED_PRESSURE3.hpp"
 # include "streams/UAVIONIX_ADSB_OUT_CFG.hpp"
@@ -382,6 +383,9 @@ static const StreamListItem streams_list[] = {
 #if defined(RC_CHANNELS_HPP)
 	create_stream_list_item<MavlinkStreamRCChannels>(),
 #endif // RC_CHANNELS_HPP
+#if defined(RT_CONTROL_TELEMETRY_HPP)
+	create_stream_list_item<MavlinkStreamRtControlTelemetry>(),
+#endif // RT_CONTROL_TELEMETRY_HPP
 #if defined(MANUAL_CONTROL_HPP)
 	create_stream_list_item<MavlinkStreamManualControl>(),
 #endif // MANUAL_CONTROL_HPP

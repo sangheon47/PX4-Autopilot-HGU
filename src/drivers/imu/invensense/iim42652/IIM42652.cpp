@@ -35,12 +35,7 @@
 #include <drivers/drv_dshot.h>
 #include <drivers/drv_pwm_output.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <unistd.h>
+#include <string.h>
 
 using namespace time_literals;
 
@@ -122,8 +117,8 @@ int IIM42652::init()
 		return PX4_ERROR;
 	}
 
-	if (!InitUdpTelemetry()) {
-		PX4_WARN("udp telemetry init failed (continue)");
+	if (!_rt_control_telem_pub.advertise()) {
+		PX4_WARN("rt_control_telemetry advertise failed");
 	}
 
 	return Reset() ? 0 : -1;
@@ -142,7 +137,7 @@ bool IIM42652::Reset()
 void IIM42652::exit_and_cleanup()
 {
 	StopControlLoopIRQ();
-	DeinitUdpTelemetry();
+	_rt_control_telem_pub.unadvertise();
 	DeinitActuatorDirect();
 	DataReadyInterruptDisable();
 	I2CSPIDriverBase::exit_and_cleanup();
@@ -228,6 +223,11 @@ void IIM42652::print_status()
 		 (unsigned long)perf_event_count(_bad_register_perf),
 		 (unsigned)_failure_count,
 		 (unsigned long)_last_frame.missed_cycles);
+
+	PX4_INFO("RT telem topic=rt_control_telemetry advertised=%s pub_ok=%lu pub_fail=%lu",
+		 _rt_control_telem_pub.advertised() ? "true" : "false",
+		 (unsigned long)_telem_publish_count,
+		 (unsigned long)_telem_publish_fail_count);
 }
 
 void IIM42652::custom_method(const BusCLIArguments &cli)
@@ -391,7 +391,7 @@ void IIM42652::RunImpl()
 	case STATE::RT_LOOP_RUN: {
 					if (_control_loop_running) {
 						PublishSampleOutsideIRQ();
-						FlushTelemetry(64);
+						PublishTelemetryOutsideIRQ();
 
 					if (_request_reset) {
 						_request_reset = false;
@@ -1076,7 +1076,6 @@ void IIM42652::StartControlLoopIRQ()
 
 	hrt_call_init(&_control_loop_call);
 	rt_control_state_reset(&_rt_control_state);
-	rt_control_queue_reset(&_tx_q);
 	// Base time is set once before the periodic callback starts to avoid per-cycle init checks.
 	_rt_control_state.t0_us = static_cast<uint64_t>(hrt_absolute_time()) + CONTROL_PERIOD_US;
 	_rt_control_state.last_control_ts_us = 0U;
@@ -1085,7 +1084,10 @@ void IIM42652::StartControlLoopIRQ()
 	_fifo_flush_pending = false;
 	_latest_publish_seq.store(0);
 	_published_seq = 0;
-	_tx_err_count = 0;
+	_pending_telem_seq.store(0);
+	_published_telem_seq = 0;
+	_telem_publish_count = 0;
+	_telem_publish_fail_count = 0;
 
 	hrt_call_every(&_control_loop_call, CONTROL_PERIOD_US, CONTROL_PERIOD_US, ControlLoopTrampoline, this);
 	_control_loop_running = true;
@@ -1286,7 +1288,82 @@ void IIM42652::TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, 
 	f.slack_us = (f.exec_us < CONTROL_PERIOD_US) ? (CONTROL_PERIOD_US - f.exec_us) : 0U;
 
 	_last_frame = f;
-	EnqueueTelemetry(f);
+	QueueTelemetryForPublish(f, cycle_begin);
+}
+
+void IIM42652::QueueTelemetryForPublish(const TelemetryFrame &frame, hrt_abstime timestamp)
+{
+	const uint32_t seq = _pending_telem_seq.load();
+	_pending_telem_seq.store(seq + 1); // writer begin (odd)
+	_pending_telem.timestamp = timestamp;
+	_pending_telem.frame = frame;
+	_pending_telem_seq.store(seq + 2); // writer end (even)
+}
+
+void IIM42652::PublishTelemetryOutsideIRQ()
+{
+	if (!_rt_control_telem_pub.advertised()) {
+		return;
+	}
+
+	PendingTelemetry pending{};
+	uint32_t seq_begin{0};
+	uint32_t seq_end{0};
+
+	do {
+		seq_begin = _pending_telem_seq.load();
+
+		if (seq_begin == 0 || (seq_begin & 1u)) {
+			return;
+		}
+
+		pending = _pending_telem;
+		seq_end = _pending_telem_seq.load();
+
+	} while ((seq_begin != seq_end) || (seq_end & 1u));
+
+	if (seq_end == _published_telem_seq) {
+		return;
+	}
+
+	_published_telem_seq = seq_end;
+
+	const TelemetryFrame &frame = pending.frame;
+	rt_control_telemetry_s msg{};
+	msg.timestamp = pending.timestamp;
+	msg.cycle = frame.cycle;
+	msg.ideal_start_s = frame.ideal_start_s;
+	msg.actual_start_s = frame.actual_start_s;
+	msg.exec_us = frame.exec_us;
+	msg.input_us = frame.input_us;
+	msg.control_us = frame.control_us;
+	msg.output_us = frame.output_us;
+	msg.slack_us = frame.slack_us;
+	msg.missed_cycles = frame.missed_cycles;
+
+	for (int i = 0; i < 3; ++i) {
+		msg.accel_m_s2[i] = frame.accel_m_s2[i];
+		msg.gyro_rad_s[i] = frame.gyro_rad_s[i];
+	}
+
+	for (int i = 0; i < MOTOR_COUNT; ++i) {
+		msg.motor_norm[i] = frame.motor_norm[i];
+	}
+
+	for (int i = 0; i < SERVO_COUNT; ++i) {
+		msg.servo_pwm_us[i] = frame.servo_pwm_us[i];
+	}
+
+	for (int i = 0; i < BLDC_COUNT; ++i) {
+		msg.bldc_dshot[i] = frame.bldc_dshot[i];
+	}
+
+	if (_rt_control_telem_pub.publish(msg)) {
+		_telem_publish_count++;
+
+	} else {
+		_telem_publish_fail_count++;
+	}
 }
 
 void IIM42652::WriteStep(const float motor_norm[MOTOR_COUNT], ActuatorWriteResult &out)
@@ -1335,60 +1412,6 @@ void IIM42652::WriteStep(const float motor_norm[MOTOR_COUNT], ActuatorWriteResul
 
 	if (_dshot_initialized) {
 		up_dshot_trigger();
-	}
-}
-
-bool IIM42652::InitUdpTelemetry()
-{
-	_udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (_udp_fd < 0) {
-		return false;
-	}
-
-	const int flags = fcntl(_udp_fd, F_GETFL, 0);
-	if (flags >= 0) {
-		fcntl(_udp_fd, F_SETFL, flags | O_NONBLOCK);
-	}
-
-	_telem_ip = inet_addr("192.168.0.10"); // 수신 PC IP로 변경
-	_telem_port = 14556;
-	return true;
-}
-
-void IIM42652::EnqueueTelemetry(const TelemetryFrame &f)
-{
-	rt_control_queue_enqueue(&_tx_q, &f);
-}
-
-void IIM42652::FlushTelemetry(uint8_t budget)
-{
-	if (_udp_fd < 0) { return; }
-
-	sockaddr_in dst{};
-	dst.sin_family = AF_INET;
-	dst.sin_port = htons(_telem_port);
-	dst.sin_addr.s_addr = _telem_ip;
-
-	for (uint8_t i = 0; i < budget; i++) {
-		TelemetryFrame frame{};
-
-		if (!rt_control_queue_copy_peek(&_tx_q, &frame)) {
-			break;
-		}
-
-		const ssize_t n = sendto(_udp_fd, &frame, sizeof(frame), 0, reinterpret_cast<sockaddr *>(&dst), sizeof(dst));
-
-		if (n < 0) {
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				break;
-			}
-
-			_tx_err_count++;
-			rt_control_queue_pop(&_tx_q); // 오류 프레임 드랍
-			continue;
-		}
-
-		rt_control_queue_pop(&_tx_q);
 	}
 }
 
@@ -1445,13 +1468,5 @@ void IIM42652::DeinitActuatorDirect()
 		up_pwm_servo_arm(false, _servo_mask);
 		up_pwm_servo_deinit(_servo_mask);
 		_pwm_initialized = false;
-	}
-}
-
-void IIM42652::DeinitUdpTelemetry()
-{
-	if (_udp_fd >= 0) {
-		::close(_udp_fd);
-		_udp_fd = -1;
 	}
 }

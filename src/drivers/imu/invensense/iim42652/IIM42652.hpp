@@ -48,8 +48,11 @@
 #include <lib/drivers/gyroscope/PX4Gyroscope.hpp>
 #include <lib/geo/geo.h>
 #include <lib/perf/perf_counter.h>
+#include <stddef.h>
 #include <px4_platform_common/atomic.h>
 #include <px4_platform_common/i2c_spi_buses.h>
+#include <uORB/Publication.hpp>
+#include <uORB/topics/rt_control_telemetry.h>
 
 extern "C" {
 #include <rt_control/rt_control.h>
@@ -249,7 +252,6 @@ private:
 	};
 
 	using TelemetryFrame = rt_control_telemetry_frame_t;
-	rt_control_queue_t _tx_q{};
 
 	TelemetryFrame _last_frame{}; // status 출력용(가장 최근 주기)
 
@@ -264,6 +266,13 @@ private:
 	LatestPublishSample _latest_publish_sample{};
 	px4::atomic<uint32_t> _latest_publish_seq{0}; // odd: writer in progress, even: stable
 	uint32_t _published_seq{0};
+	struct PendingTelemetry {
+		hrt_abstime timestamp{0};
+		TelemetryFrame frame{};
+	};
+	PendingTelemetry _pending_telem{};
+	px4::atomic<uint32_t> _pending_telem_seq{0}; // odd: writer in progress, even: stable
+	uint32_t _published_telem_seq{0};
 
 	bool _pwm_initialized{false};
 	bool _dshot_initialized{false};
@@ -272,12 +281,9 @@ private:
 	hrt_abstime _dshot_startup_hold_until{0};
 	px4::atomic<uint8_t> _bldc_manual_mode{static_cast<uint8_t>(BldcManualMode::Stop)};
 	px4::atomic<uint16_t> _bldc_manual_norm_milli{0};
-
-	int _udp_fd{-1};
-	uint32_t _telem_ip{0}; // network byte order
-	uint16_t _telem_port{14556};
-
-	uint32_t _tx_err_count{0};
+	uORB::Publication<rt_control_telemetry_s> _rt_control_telem_pub{ORB_ID(rt_control_telemetry)};
+	uint32_t _telem_publish_count{0};
+	uint32_t _telem_publish_fail_count{0};
 
 	rt_control_state_t _rt_control_state{};
 	hrt_call _control_loop_call{};
@@ -294,10 +300,8 @@ private:
 	void DeinitActuatorDirect();
 	void WriteStep(const float motor_norm[MOTOR_COUNT], ActuatorWriteResult &out);
 
-	bool InitUdpTelemetry();
-	void DeinitUdpTelemetry();
-	void EnqueueTelemetry(const TelemetryFrame &frame);
-	void FlushTelemetry(uint8_t budget);
+	void QueueTelemetryForPublish(const TelemetryFrame &frame, hrt_abstime timestamp);
+	void PublishTelemetryOutsideIRQ();
 	void PublishSampleOutsideIRQ();
 
 	void TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, uint32_t control_us, uint32_t output_us,

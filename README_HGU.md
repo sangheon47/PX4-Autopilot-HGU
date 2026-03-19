@@ -11,7 +11,7 @@
 - 표준 `dshot start`를 비활성화하고 `iim42652`가 DShot 출력 5-6을 직접 소유하도록 정리함
 - `IIM42652` 내부에 200 Hz 실시간 루프를 추가함
 - 제어기 코드를 `src/lib/rt_control/`로 분리함
-- UDP 텔레메트리 큐와 상태 출력 기능을 추가함
+- `rt_control_telemetry` uORB + MAVLink TUNNEL 스트림을 추가함
 - `iim42652 motor auto|stop|status|set <0..1>` 콘솔 명령을 추가함
 - DShot startup hold와 기본 `stop` 모드를 추가함
 
@@ -126,12 +126,57 @@ iim42652 -s -R 22 start
 - 루프 주기: `IIM42652.hpp`의 `CONTROL_PERIOD_US`
 - PWM 범위: `IIM42652.hpp`의 `PWM_MIN_US`, `PWM_MAX_US`
 - DSHOT 최대값: `IIM42652.hpp`의 `DSHOT_THROTTLE_MAX`
-- UDP 목적지: `IIM42652.cpp`의 `InitUdpTelemetry()`
+- 텔레메트리 MAVLink 스트림: `src/modules/mavlink/streams/RT_CONTROL_TELEMETRY.hpp`
 
 ## 출력 매핑
 
 - Servo 출력: 채널 1-4
 - BLDC DSHOT 출력: 채널 5-6
+
+## TELEM1 MAVLink 텔레메트리 수신
+
+현재 `iim42652` 텔레메트리는 `rt_control_telemetry` uORB 토픽으로 publish 되고,
+MAVLink `TUNNEL` 메시지로 `TELEM1` 링크를 통해 송신됩니다.
+
+사전 설정:
+
+```bash
+param set MAV_0_CONFIG 101
+param set MAV_0_MODE 2
+param set MAV_0_RATE 80000
+param set SER_TEL1_BAUD 921600
+param save
+reboot
+```
+
+의미:
+
+- `MAV_0_CONFIG 101`: `TELEM1`를 MAVLink instance 0으로 사용
+- `MAV_0_MODE 2`: companion/onboard용 기본 스트림 세트 사용
+- `MAV_0_RATE 80000`: 200 Hz RT 텔레메트리와 기본 MAVLink 스트림을 같이 보내기 위한 송신 rate
+- `SER_TEL1_BAUD 921600`: TELEM1 UART 보레이트
+
+수신 PC에서는 아래 스크립트로 저장합니다.
+
+UDP 브리지 모드 예시:
+
+```bash
+python3 Tools/telem_csv_logger.py --mode udp --udp-port 14550 --output logs/rt_telem.csv
+```
+
+직렬 직접 수신 예시:
+
+```bash
+python3 Tools/telem_csv_logger.py --mode serial --serial-device /dev/ttyUSB0 --serial-baud 921600 --output logs/rt_telem.csv
+```
+
+생성된 CSV는 MATLAB `readtable()` 또는 Python `pandas.read_csv()`로 바로 읽을 수 있습니다.
+
+DroneBridge 설정은 아래처럼 두는 것이 맞습니다.
+
+- `UART serial protocol`: `MAVLink`
+- `UART baud`: `921600`
+- UDP 수신 포트: 보통 `14550`
 
 ## 수동 BLDC 제어
 
@@ -183,6 +228,7 @@ iim42652 status
 
 - `RT period_us=5000`
 - `manual_mode`
+- `RT telem topic=rt_control_telemetry advertised=true`
 - `manual`
 - `hold_active`
 - cycle 카운터
