@@ -81,6 +81,7 @@ iim42652 motor stop
 문서를 보면 됩니다.
 
 - [README_HGU.md](README_HGU.md)
+- `TELEM1 MAVLink` 수신, `DroneBridge` 설정, `rt_telem.csv` 저장 방법도 `README_HGU.md`에 정리되어 있습니다.
 
 ## 주요 파일
 

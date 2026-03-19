@@ -178,6 +178,123 @@ DroneBridge 설정은 아래처럼 두는 것이 맞습니다.
 - `UART baud`: `921600`
 - UDP 수신 포트: 보통 `14550`
 
+## RT 텔레메트리 CSV 저장
+
+수신기는 아래 스크립트 하나로 충분합니다.
+
+```bash
+python3 Tools/telem_csv_logger.py --mode udp --udp-port 14550 --output logs/rt_telem.csv
+```
+
+중요:
+
+- `--output logs/rt_telem.csv`는 현재 셸 작업 디렉터리 기준 상대경로입니다.
+- 예를 들어 `/home/psh`에서 실행하면 `/home/psh/logs/rt_telem.csv`에 저장됩니다.
+- 저장 위치를 헷갈리지 않으려면 절대경로를 쓰는 편이 안전합니다.
+
+예시:
+
+```bash
+python3 /home/psh/PX4-Autopilot/Tools/telem_csv_logger.py \
+  --mode udp \
+  --udp-port 14550 \
+  --output /home/psh/PX4-Autopilot/logs/rt_telem.csv
+```
+
+CSV 컬럼:
+
+- `timestamp_us`: PX4 부팅 이후 마이크로초
+- `cycle`: RT 루프 cycle 카운터
+- `ideal_start_s`, `actual_start_s`, `start_jitter_s`
+- `exec_us`, `input_us`, `control_us`, `output_us`, `slack_us`
+- `missed_cycles`
+- `accel_x/y/z`, `gyro_x/y/z`
+- `motor_1..motor_6`
+- `servo_1_pwm_us..servo_4_pwm_us`
+- `bldc_1_dshot`, `bldc_2_dshot`
+
+MATLAB/Python 예시:
+
+```matlab
+T = readtable("/home/psh/PX4-Autopilot/logs/rt_telem.csv");
+```
+
+```python
+import pandas as pd
+df = pd.read_csv("/home/psh/PX4-Autopilot/logs/rt_telem.csv")
+```
+
+## 수신 확인 방법
+
+보드 쪽:
+
+```bash
+iim42652 status
+listener rt_control_telemetry 1
+mavlink status
+```
+
+정상일 때 확인 포인트:
+
+- `iim42652 status`에서 `RT telem topic=rt_control_telemetry advertised=true`
+- `iim42652 status`에서 `pub_ok`가 증가
+- `iim42652 status`에서 `pub_fail`는 증가하지 않거나 매우 작음
+- `listener rt_control_telemetry 1`에서 토픽 1개가 출력됨
+- `mavlink status`에서 `transport protocol: serial (/dev/ttyS5 @921600)`
+
+PC 쪽:
+
+- `telem_csv_logger.py` 실행 후 `rows=... last_cycle=...`가 계속 증가하면 수신 중입니다.
+- 파일 크기가 계속 커지면 CSV 저장도 정상입니다.
+
+## 주파수 해석
+
+RT 루프 자체는 `CONTROL_PERIOD_US = 5000`이므로 내부 생성 주기는 200 Hz입니다.
+다만 Wi-Fi/UDP/MAVLink 구간에서 몇 개 행이 빠질 수 있어서, 최종 CSV 저장 속도는
+200 Hz보다 조금 낮게 보일 수 있습니다.
+
+즉 아래 둘은 다른 값입니다.
+
+- FC 내부 RT 생성 속도: 보통 200 Hz
+- PC에 실제 저장된 CSV 행 속도: 링크 상태에 따라 약간 낮을 수 있음
+
+확인 기준:
+
+- `cycle`이 일정하게 증가하면 FC 내부 생성은 정상
+- `timestamp_us` 차이가 평균 5000 us 근처면 200 Hz에 가깝게 저장되고 있는 것
+- `cycle`이 중간에 2 이상 건너뛰면 그만큼 중간 패킷이 빠진 것
+
+간단 확인 예시:
+
+```bash
+python3 - <<'PY'
+import pandas as pd
+df = pd.read_csv('/home/psh/PX4-Autopilot/logs/rt_telem.csv')
+dt = df['timestamp_us'].diff().dropna()
+print('rows =', len(df))
+print('saved_hz =', 1e6 / dt.mean())
+print('cycle_loss =', (df['cycle'].diff().fillna(1) != 1).sum())
+PY
+```
+
+해석:
+
+- `saved_hz`가 200에 가까우면 거의 그대로 저장된 것
+- `cycle_loss`가 0이면 CSV에 빠진 주기가 없다는 뜻
+- `cycle_loss`가 0보다 크면 Wi-Fi/UDP/MAVLink/PC 수신 구간에서 일부 누락이 있다는 뜻
+
+## 현재 구조의 의미
+
+지금 구조는 다음과 같습니다.
+
+- RT 루프 안에서는 센서 읽기, 제어 계산, 출력 계산만 수행
+- RT 텔레메트리는 RT 루프에서 lock-free로 큐잉
+- uORB publish와 MAVLink 송신은 RT 루프 바깥 문맥에서 수행
+- 따라서 RT 제어 주기를 직접 막지 않도록 구성되어 있음
+
+즉 CSV에 저장된 값은 RT 루프에서 만든 값을 바깥으로 꺼내서 기록한 것이고,
+실제 제어 루프와 완전히 분리된 경로로 나갑니다.
+
 ## 수동 BLDC 제어
 
 MAVLink Console 또는 NSH 셸에서 아래 명령을 사용합니다.
