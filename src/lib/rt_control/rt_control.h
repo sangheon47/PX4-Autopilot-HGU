@@ -13,6 +13,18 @@ extern "C" {
 #define RT_CTRL_TX_Q_LEN 128U
 
 typedef struct {
+	float x;
+	float y;
+	float z;
+	float roll;
+	float pitch;
+	float yaw;
+	uint32_t seq;
+	uint32_t age_us;
+	bool valid;
+} rt_control_opti_sample_t;
+
+typedef struct {
 	uint32_t cycle;
 	double ideal_start_s;
 	double actual_start_s;
@@ -27,6 +39,15 @@ typedef struct {
 	float motor_norm[RT_CTRL_MOTOR_COUNT];
 	uint16_t servo_pwm_us[RT_CTRL_SERVO_COUNT];
 	uint16_t bldc_dshot[RT_CTRL_BLDC_COUNT];
+	float opti_x;
+	float opti_y;
+	float opti_z;
+	float opti_roll;
+	float opti_pitch;
+	float opti_yaw;
+	uint32_t opti_seq;
+	uint32_t opti_age_us;
+	uint8_t opti_valid;
 } rt_control_telemetry_frame_t;
 
 typedef struct {
@@ -49,6 +70,7 @@ void rt_control_queue_reset(rt_control_queue_t *queue);
 
 void rt_controller(const float accel_m_s2[3],
 		   const float gyro_rad_s[3],
+		   const rt_control_opti_sample_t *opti_sample,
 		   float motor_norm_out[RT_CTRL_MOTOR_COUNT]);
 
 void rt_control_queue_enqueue(rt_control_queue_t *queue, const rt_control_telemetry_frame_t *frame);

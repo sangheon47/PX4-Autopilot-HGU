@@ -34,7 +34,9 @@
 #include "IIM42652.hpp"
 #include <drivers/drv_dshot.h>
 #include <drivers/drv_pwm_output.h>
+#include <matrix/matrix/math.hpp>
 
+#include <math.h>
 #include <string.h>
 
 using namespace time_literals;
@@ -216,6 +218,23 @@ void IIM42652::print_status()
 		 (unsigned)_last_frame.bldc_dshot[0], (double)(_last_frame.motor_norm[4] * 100.f),
 		 (unsigned)_last_frame.bldc_dshot[1], (double)(_last_frame.motor_norm[5] * 100.f));
 
+	if (_last_frame.opti_valid) {
+		PX4_INFO("RT opti seq=%lu age_us=%lu pos=(%.4f, %.4f, %.4f) rpy=(%.4f, %.4f, %.4f)",
+			 (unsigned long)_last_frame.opti_seq,
+			 (unsigned long)_last_frame.opti_age_us,
+			 (double)_last_frame.opti_x,
+			 (double)_last_frame.opti_y,
+			 (double)_last_frame.opti_z,
+			 (double)_last_frame.opti_roll,
+			 (double)_last_frame.opti_pitch,
+			 (double)_last_frame.opti_yaw);
+
+	} else {
+		PX4_INFO("RT opti invalid seq=%lu age_us=%lu",
+			 (unsigned long)_last_frame.opti_seq,
+			 (unsigned long)_last_frame.opti_age_us);
+	}
+
 	PX4_INFO("RT perf bad_xfer=%lu fifo_empty=%lu fifo_overflow=%lu bad_reg=%lu failure_count=%u missed_cycles=%lu",
 		 (unsigned long)perf_event_count(_bad_transfer_perf),
 		 (unsigned long)perf_event_count(_fifo_empty_perf),
@@ -390,6 +409,7 @@ void IIM42652::RunImpl()
 
 	case STATE::RT_LOOP_RUN: {
 					if (_control_loop_running) {
+						UpdateLatestOptiSampleOutsideIRQ();
 						PublishSampleOutsideIRQ();
 						PublishTelemetryOutsideIRQ();
 
@@ -1129,8 +1149,11 @@ void IIM42652::ControlLoopIRQ()
 
 	// Compute Output
 	float motor_norm[MOTOR_COUNT] {};
+	LatestOptiSample opti_sample{};
+	(void)CopyLatestOptiSample(opti_sample);
+	const rt_control_opti_sample_t opti_input = BuildRtControlOptiSample(cycle_begin, opti_sample);
 	const hrt_abstime control_begin = hrt_absolute_time();
-	rt_controller(_latest_accel_m_s2, _latest_gyro_rad_s, motor_norm);
+	rt_controller(_latest_accel_m_s2, _latest_gyro_rad_s, &opti_input, motor_norm);
 	const uint32_t control_us = static_cast<uint32_t>(hrt_absolute_time() - control_begin);
 
 	// Write actuator
@@ -1140,7 +1163,7 @@ void IIM42652::ControlLoopIRQ()
 	const uint32_t output_us = static_cast<uint32_t>(hrt_absolute_time() - output_begin);
 
 	// Telemetry Write & Send
-	TelemetryStep(cycle_begin, input_us, control_us, output_us, motor_norm, write_result);
+	TelemetryStep(cycle_begin, input_us, control_us, output_us, motor_norm, write_result, opti_input);
 }
 
 bool IIM42652::ReadSampleDirect(const hrt_abstime &timestamp_sample)
@@ -1234,8 +1257,101 @@ void IIM42652::PublishSampleOutsideIRQ()
 	_px4_gyro.update(sample.timestamp_sample, sample.gyro_raw[0], sample.gyro_raw[1], sample.gyro_raw[2]);
 }
 
+void IIM42652::UpdateLatestOptiSampleOutsideIRQ()
+{
+	vehicle_odometry_s odom{};
+
+	if (!_vehicle_visual_odometry_sub.update(&odom)) {
+		return;
+	}
+
+	LatestOptiSample sample{};
+	sample.timestamp_sample = (odom.timestamp_sample != 0) ? odom.timestamp_sample : odom.timestamp;
+	sample.seq = ++_opti_sample_counter;
+
+	const bool position_valid = PX4_ISFINITE(odom.position[0])
+				    && PX4_ISFINITE(odom.position[1])
+				    && PX4_ISFINITE(odom.position[2]);
+	const matrix::Quatf attitude_q(odom.q);
+	const bool attitude_valid = attitude_q.isAllFinite();
+
+	if (position_valid && attitude_valid) {
+		const matrix::Eulerf attitude_euler(attitude_q);
+		sample.x = odom.position[0];
+		sample.y = odom.position[1];
+		sample.z = odom.position[2];
+		sample.roll = attitude_euler.phi();
+		sample.pitch = attitude_euler.theta();
+		sample.yaw = attitude_euler.psi();
+		sample.valid = PX4_ISFINITE(sample.roll)
+			       && PX4_ISFINITE(sample.pitch)
+			       && PX4_ISFINITE(sample.yaw);
+
+	} else {
+		sample.x = NAN;
+		sample.y = NAN;
+		sample.z = NAN;
+		sample.roll = NAN;
+		sample.pitch = NAN;
+		sample.yaw = NAN;
+		sample.valid = false;
+	}
+
+	const uint32_t seq = _latest_opti_sample_seq.load();
+	_latest_opti_sample_seq.store(seq + 1); // writer begin (odd)
+	_latest_opti_sample = sample;
+	_latest_opti_sample_seq.store(seq + 2); // writer end (even)
+}
+
+bool IIM42652::CopyLatestOptiSample(LatestOptiSample &sample) const
+{
+	uint32_t seq_begin{0};
+	uint32_t seq_end{0};
+
+	do {
+		seq_begin = _latest_opti_sample_seq.load();
+
+		if (seq_begin == 0 || (seq_begin & 1u)) {
+			return false;
+		}
+
+		sample = _latest_opti_sample;
+		seq_end = _latest_opti_sample_seq.load();
+
+	} while ((seq_begin != seq_end) || (seq_end & 1u));
+
+	return true;
+}
+
+rt_control_opti_sample_t IIM42652::BuildRtControlOptiSample(const hrt_abstime &cycle_begin,
+		const LatestOptiSample &sample) const
+{
+	rt_control_opti_sample_t opti{};
+
+	if (sample.seq == 0U) {
+		return opti;
+	}
+
+	opti.x = sample.x;
+	opti.y = sample.y;
+	opti.z = sample.z;
+	opti.roll = sample.roll;
+	opti.pitch = sample.pitch;
+	opti.yaw = sample.yaw;
+	opti.seq = sample.seq;
+
+	const uint64_t now_us = static_cast<uint64_t>(cycle_begin);
+	const uint64_t age_us = (sample.timestamp_sample > 0 && now_us >= sample.timestamp_sample)
+				? (now_us - sample.timestamp_sample)
+				: 0ULL;
+	opti.age_us = static_cast<uint32_t>(math::min<uint64_t>(age_us, UINT32_MAX));
+	opti.valid = sample.valid && (opti.age_us <= OPTI_TIMEOUT_US);
+	return opti;
+}
+
 void IIM42652::TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, uint32_t control_us, uint32_t output_us,
-			     const float motor_norm[MOTOR_COUNT], const ActuatorWriteResult &write_result)
+			     const float motor_norm[MOTOR_COUNT], const ActuatorWriteResult &write_result,
+			     const rt_control_opti_sample_t &opti_sample)
 {
 	TelemetryFrame f{};
 	const uint64_t now_us = static_cast<uint64_t>(cycle_begin);
@@ -1287,6 +1403,16 @@ void IIM42652::TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, 
 	f.exec_us = static_cast<uint32_t>(hrt_absolute_time() - cycle_begin);
 	f.slack_us = (f.exec_us < CONTROL_PERIOD_US) ? (CONTROL_PERIOD_US - f.exec_us) : 0U;
 
+	f.opti_x = (opti_sample.seq > 0U) ? opti_sample.x : NAN;
+	f.opti_y = (opti_sample.seq > 0U) ? opti_sample.y : NAN;
+	f.opti_z = (opti_sample.seq > 0U) ? opti_sample.z : NAN;
+	f.opti_roll = (opti_sample.seq > 0U) ? opti_sample.roll : NAN;
+	f.opti_pitch = (opti_sample.seq > 0U) ? opti_sample.pitch : NAN;
+	f.opti_yaw = (opti_sample.seq > 0U) ? opti_sample.yaw : NAN;
+	f.opti_seq = opti_sample.seq;
+	f.opti_age_us = opti_sample.age_us;
+	f.opti_valid = opti_sample.valid ? 1U : 0U;
+
 	_last_frame = f;
 	QueueTelemetryForPublish(f, cycle_begin);
 }
@@ -1332,14 +1458,21 @@ void IIM42652::PublishTelemetryOutsideIRQ()
 	rt_control_telemetry_s msg{};
 	msg.timestamp = pending.timestamp;
 	msg.cycle = frame.cycle;
-	msg.ideal_start_s = frame.ideal_start_s;
 	msg.actual_start_s = frame.actual_start_s;
 	msg.exec_us = frame.exec_us;
 	msg.input_us = frame.input_us;
 	msg.control_us = frame.control_us;
 	msg.output_us = frame.output_us;
-	msg.slack_us = frame.slack_us;
 	msg.missed_cycles = frame.missed_cycles;
+	msg.opti_x = frame.opti_x;
+	msg.opti_y = frame.opti_y;
+	msg.opti_z = frame.opti_z;
+	msg.opti_roll = frame.opti_roll;
+	msg.opti_pitch = frame.opti_pitch;
+	msg.opti_yaw = frame.opti_yaw;
+	msg.opti_seq = frame.opti_seq;
+	msg.opti_age_us = frame.opti_age_us;
+	msg.opti_valid = frame.opti_valid;
 
 	for (int i = 0; i < 3; ++i) {
 		msg.accel_m_s2[i] = frame.accel_m_s2[i];
@@ -1348,14 +1481,6 @@ void IIM42652::PublishTelemetryOutsideIRQ()
 
 	for (int i = 0; i < MOTOR_COUNT; ++i) {
 		msg.motor_norm[i] = frame.motor_norm[i];
-	}
-
-	for (int i = 0; i < SERVO_COUNT; ++i) {
-		msg.servo_pwm_us[i] = frame.servo_pwm_us[i];
-	}
-
-	for (int i = 0; i < BLDC_COUNT; ++i) {
-		msg.bldc_dshot[i] = frame.bldc_dshot[i];
 	}
 
 	if (_rt_control_telem_pub.publish(msg)) {

@@ -52,7 +52,9 @@
 #include <px4_platform_common/atomic.h>
 #include <px4_platform_common/i2c_spi_buses.h>
 #include <uORB/Publication.hpp>
+#include <uORB/Subscription.hpp>
 #include <uORB/topics/rt_control_telemetry.h>
+#include <uORB/topics/vehicle_odometry.h>
 
 extern "C" {
 #include <rt_control/rt_control.h>
@@ -273,6 +275,22 @@ private:
 	PendingTelemetry _pending_telem{};
 	px4::atomic<uint32_t> _pending_telem_seq{0}; // odd: writer in progress, even: stable
 	uint32_t _published_telem_seq{0};
+	struct LatestOptiSample {
+		hrt_abstime timestamp_sample{0};
+		float x{0.f};
+		float y{0.f};
+		float z{0.f};
+		float roll{0.f};
+		float pitch{0.f};
+		float yaw{0.f};
+		uint32_t seq{0};
+		bool valid{false};
+	};
+	static constexpr uint32_t OPTI_TIMEOUT_US{200000}; // stale sample cutoff for telemetry valid flag
+	uORB::Subscription _vehicle_visual_odometry_sub{ORB_ID(vehicle_visual_odometry)};
+	LatestOptiSample _latest_opti_sample{};
+	px4::atomic<uint32_t> _latest_opti_sample_seq{0}; // odd: writer in progress, even: stable
+	uint32_t _opti_sample_counter{0};
 
 	bool _pwm_initialized{false};
 	bool _dshot_initialized{false};
@@ -303,9 +321,14 @@ private:
 	void QueueTelemetryForPublish(const TelemetryFrame &frame, hrt_abstime timestamp);
 	void PublishTelemetryOutsideIRQ();
 	void PublishSampleOutsideIRQ();
+	void UpdateLatestOptiSampleOutsideIRQ();
+	bool CopyLatestOptiSample(LatestOptiSample &sample) const;
+	rt_control_opti_sample_t BuildRtControlOptiSample(const hrt_abstime &cycle_begin,
+			const LatestOptiSample &sample) const;
 
 	void TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, uint32_t control_us, uint32_t output_us,
-			  const float motor_norm[MOTOR_COUNT], const ActuatorWriteResult &write_result);
+			  const float motor_norm[MOTOR_COUNT], const ActuatorWriteResult &write_result,
+			  const rt_control_opti_sample_t &opti_sample);
 	bool ReadSampleDirect(const hrt_abstime &timestamp_sample);
 	static void ControlLoopTrampoline(void *arg);
 	void ControlLoopIRQ();

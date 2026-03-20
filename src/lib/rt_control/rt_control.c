@@ -28,18 +28,31 @@ void rt_control_queue_reset(rt_control_queue_t *queue)
 
 void rt_controller(const float accel_m_s2[3],
 		   const float gyro_rad_s[3],
+		   const rt_control_opti_sample_t *opti_sample,
 		   float motor_norm_out[RT_CTRL_MOTOR_COUNT])
 {
 	assert(accel_m_s2 != NULL);
 	assert(gyro_rad_s != NULL);
 	assert(motor_norm_out != NULL);
+	const bool opti_available = (opti_sample != NULL) && opti_sample->valid;
 
-	// Body-frame accelerometer axes [m/s^2]: X, Y, Z.
-	// accel_m_s2[0], accel_m_s2[1], accel_m_s2[2]
+	// Body-frame accelerometer axes [m/s^2]
+	// X: accel_m_s2[0], 		Y: accel_m_s2[1], 		Z: accel_m_s2[2]
 
-	// Body-frame gyroscope axes [rad/s]: X(roll), Y(pitch), Z(yaw).
-	// gyro_rad_s[0], gyro_rad_s[1], gyro_rad_s[2]
+	// Body-frame gyroscope axes [rad/s]
+	// X(roll): gyro_rad_s[0], 	Y(pitch): gyro_rad_s[1], 	Z(yaw): gyro_rad_s[2]
 
+	// External OptiTrack sample [m, rad] when available:
+	// opti_sample->x, opti_sample->y, opti_sample->z
+	// opti_sample->roll, opti_sample->pitch, opti_sample->yaw
+	// opti_sample->seq, opti_sample->age_us
+	if (opti_available) {
+		// opti_sample->x, y, z
+		// opti_sample->roll, pitch, yaw
+		// opti_sample->seq, age_us
+	} else {
+		// IMU-only fallback
+	}
 
 	// Normalized actuator commands [0..1]:
 	// Servo1..Servo4 and BLDC1..BLDC2.

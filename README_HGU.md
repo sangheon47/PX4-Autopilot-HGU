@@ -156,7 +156,10 @@ reboot
 - `MAV_0_RATE 80000`: 200 Hz RT 텔레메트리와 기본 MAVLink 스트림을 같이 보내기 위한 송신 rate
 - `SER_TEL1_BAUD 921600`: TELEM1 UART 보레이트
 
-수신 PC에서는 아래 스크립트로 저장합니다.
+수신 PC에서는 아래 두 방식 중 하나를 씁니다.
+
+- PX4가 보내는 RT telemetry만 저장: `telem_csv_logger.py`
+- OptiTrack UDP를 받아 PX4로 `ODOMETRY`를 보내고, PX4가 다시 보내는 RT telemetry까지 같은 프로세스에서 저장: `udp_pose_to_px4.py`
 
 UDP 브리지 모드 예시:
 
@@ -169,6 +172,31 @@ python3 Tools/telem_csv_logger.py --mode udp --udp-port 14550 --output logs/rt_t
 ```bash
 python3 Tools/telem_csv_logger.py --mode serial --serial-device /dev/ttyUSB0 --serial-baud 921600 --output logs/rt_telem.csv
 ```
+
+OptiTrack UDP `x,y,z,roll,pitch,yaw`를 PX4로 보내고 RT telemetry도 같이 저장하는 예시:
+
+```bash
+python3 Tools/udp_pose_to_px4.py \
+  --listen-host 0.0.0.0 \
+  --listen-port 38030 \
+  --angle-unit rad \
+  --mode serial \
+  --serial-device /dev/ttyUSB0 \
+  --serial-baud 921600 \
+  --log-output logs/rt_telem.csv
+```
+
+이 스크립트는 다음을 한 번에 처리합니다.
+
+- UDP `<6f>` 패킷 수신 (`x,y,z,roll,pitch,yaw`)
+- MAVLink `ODOMETRY`로 PX4 송신
+- PX4가 다시 보내는 `RT_CONTROL_TELEMETRY` 수신
+- CSV 저장
+
+중요:
+
+- OptiTrack PC가 이미 `m`와 `rad` 기준으로 보내면 `--angle-unit rad`로 두면 됩니다.
+- 같은 serial 포트에서는 보통 `udp_pose_to_px4.py`와 `telem_csv_logger.py`를 동시에 실행하지 않는 편이 안전합니다.
 
 생성된 CSV는 MATLAB `readtable()` 또는 Python `pandas.read_csv()`로 바로 읽을 수 있습니다.
 
@@ -203,15 +231,14 @@ python3 /home/psh/PX4-Autopilot/Tools/telem_csv_logger.py \
 
 CSV 컬럼:
 
-- `timestamp_us`: PX4 부팅 이후 마이크로초
 - `cycle`: RT 루프 cycle 카운터
-- `ideal_start_s`, `actual_start_s`, `start_jitter_s`
-- `exec_us`, `input_us`, `control_us`, `output_us`, `slack_us`
+- `actual_start_s`: RT 루프 시작 이후 경과 시간 [s]
+- `exec_us`, `input_us`, `control_us`, `output_us`
 - `missed_cycles`
 - `accel_x/y/z`, `gyro_x/y/z`
 - `motor_1..motor_6`
-- `servo_1_pwm_us..servo_4_pwm_us`
-- `bldc_1_dshot`, `bldc_2_dshot`
+- `opti_x/y/z`, `opti_roll/pitch/yaw`
+- `opti_seq`, `opti_age_us`, `opti_valid`
 
 MATLAB/Python 예시:
 
@@ -261,7 +288,7 @@ RT 루프 자체는 `CONTROL_PERIOD_US = 5000`이므로 내부 생성 주기는 
 확인 기준:
 
 - `cycle`이 일정하게 증가하면 FC 내부 생성은 정상
-- `timestamp_us` 차이가 평균 5000 us 근처면 200 Hz에 가깝게 저장되고 있는 것
+- `actual_start_s` 차이가 평균 0.005 s 근처면 200 Hz에 가깝게 저장되고 있는 것
 - `cycle`이 중간에 2 이상 건너뛰면 그만큼 중간 패킷이 빠진 것
 
 간단 확인 예시:
@@ -270,9 +297,9 @@ RT 루프 자체는 `CONTROL_PERIOD_US = 5000`이므로 내부 생성 주기는 
 python3 - <<'PY'
 import pandas as pd
 df = pd.read_csv('/home/psh/PX4-Autopilot/logs/rt_telem.csv')
-dt = df['timestamp_us'].diff().dropna()
+dt = df['actual_start_s'].diff().dropna()
 print('rows =', len(df))
-print('saved_hz =', 1e6 / dt.mean())
+print('saved_hz =', 1.0 / dt.mean())
 print('cycle_loss =', (df['cycle'].diff().fillna(1) != 1).sum())
 PY
 ```
