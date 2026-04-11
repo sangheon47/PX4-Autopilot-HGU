@@ -1499,7 +1499,9 @@ Mavlink::configure_streams_to_default(const char *configure_single_stream)
 		configure_stream_local("OBSTACLE_DISTANCE", 10.0f);
 		configure_stream_local("ODOMETRY", 30.0f);
 #if !defined(CONSTRAINED_FLASH)
-		configure_stream_local("RT_CONTROL_TELEMETRY", 200.0f);
+		if (!_is_usb_uart) {
+			configure_stream_local("RT_CONTROL_TELEMETRY", 200.0f);
+		}
 #endif
 
 		configure_stream_local("ADSB_VEHICLE", unlimited_rate);

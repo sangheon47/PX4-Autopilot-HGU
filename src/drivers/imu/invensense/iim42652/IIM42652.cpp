@@ -32,9 +32,9 @@
  ****************************************************************************/
 
 #include "IIM42652.hpp"
-#include <drivers/drv_dshot.h>
 #include <drivers/drv_pwm_output.h>
 #include <matrix/matrix/math.hpp>
+#include <px4_arch/io_timer.h>
 
 #include <math.h>
 #include <string.h>
@@ -49,6 +49,25 @@ static constexpr int16_t combine(uint8_t msb, uint8_t lsb)
 static constexpr uint16_t combine_uint(uint8_t msb, uint8_t lsb)
 {
 	return (msb << 8u) | lsb;
+}
+
+static const char *motor_output_mode_str(uint8_t mode_raw)
+{
+	switch (mode_raw) {
+	case 0:
+		return "safe_idle";
+
+	case 1:
+		return "esc_cal_high";
+
+	case 2:
+		return "esc_cal_low";
+
+	case 3:
+		return "esc_test";
+	}
+
+	return "unknown";
 }
 
 struct DirectDataRegisterBuffer {
@@ -151,36 +170,12 @@ void IIM42652::print_status()
 		 (unsigned)CONTROL_PERIOD_US,
 		 (double)(1000000.0 / (double)CONTROL_PERIOD_US));
 
-	const hrt_abstime now = hrt_absolute_time();
-	const bool dshot_hold_active = _dshot_initialized && now < _dshot_startup_hold_until;
-	const unsigned long dshot_hold_remaining_ms = dshot_hold_active
-			? (unsigned long)((_dshot_startup_hold_until - now) / 1000)
-			: 0UL;
-	const uint16_t manual_norm_milli = _bldc_manual_norm_milli.load();
-
-	const char *manual_mode = "unknown";
-
-	switch (static_cast<BldcManualMode>(_bldc_manual_mode.load())) {
-	case BldcManualMode::Auto:
-		manual_mode = "auto";
-		break;
-
-	case BldcManualMode::Stop:
-		manual_mode = "stop";
-		break;
-
-	case BldcManualMode::Set:
-		manual_mode = "set";
-		break;
-	}
-
-	PX4_INFO("RT dshot initialized=%s hold_active=%s hold_remaining_ms=%lu mask=0x%lx manual_mode=%s manual=%.3f",
-		 _dshot_initialized ? "true" : "false",
-		 dshot_hold_active ? "true" : "false",
-		 dshot_hold_remaining_ms,
-		 (unsigned long)_dshot_mask,
-		 manual_mode,
-		 (double)manual_norm_milli / 1000.0);
+	PX4_INFO("RT pwm initialized=%s rate_hz=%u mask=0x%lx output_mode=%s test_pwm_us=%u",
+		 _pwm_initialized ? "true" : "false",
+		 MOTOR_PWM_RATE,
+		 (unsigned long)_motor_pwm_mask,
+		 motor_output_mode_str(_motor_output_mode.load()),
+		 (unsigned)_esc_test_pwm_us.load());
 
 	if (_last_frame.cycle == 0) {
 		PX4_INFO("RT no cycle yet");
@@ -210,13 +205,24 @@ void IIM42652::print_status()
 		 (double)_last_frame.accel_m_s2[0], (double)_last_frame.accel_m_s2[1], (double)_last_frame.accel_m_s2[2],
 		 (double)_last_frame.gyro_rad_s[0], (double)_last_frame.gyro_rad_s[1], (double)_last_frame.gyro_rad_s[2]);
 
-	PX4_INFO("RT servo_pwm_us=%u(%.2f%%) %u(%.2f%%) %u(%.2f%%) %u(%.2f%%) bldc_dshot=%u(%.2f%%) %u(%.2f%%)",
-		 (unsigned)_last_frame.servo_pwm_us[0], (double)(_last_frame.motor_norm[0] * 100.f),
-		 (unsigned)_last_frame.servo_pwm_us[1], (double)(_last_frame.motor_norm[1] * 100.f),
-		 (unsigned)_last_frame.servo_pwm_us[2], (double)(_last_frame.motor_norm[2] * 100.f),
-		 (unsigned)_last_frame.servo_pwm_us[3], (double)(_last_frame.motor_norm[3] * 100.f),
-		 (unsigned)_last_frame.bldc_dshot[0], (double)(_last_frame.motor_norm[4] * 100.f),
-		 (unsigned)_last_frame.bldc_dshot[1], (double)(_last_frame.motor_norm[5] * 100.f));
+	rt_controller_debug_state_t debug_state{};
+	rt_controller_get_debug_state(&debug_state);
+	PX4_INFO("RT tilt_deg init=%u raw=(y=%.2f z=%.2f) rel=(y=%.2f z=%.2f) ref=(y=%.2f z=%.2f) ref_valid=(y=%u z=%u)",
+		 (unsigned)debug_state.initialized,
+		 (double)debug_state.tilt_y_deg,
+		 (double)debug_state.tilt_z_deg,
+		 (double)debug_state.tilt_y_rel_deg,
+		 (double)debug_state.tilt_z_rel_deg,
+		 (double)debug_state.tilt_y_ref_deg,
+		 (double)debug_state.tilt_z_ref_deg,
+		 (unsigned)debug_state.tilt_y_ref_initialized,
+		 (unsigned)debug_state.tilt_z_ref_initialized);
+
+	PX4_INFO("RT pwm_us=%u(%.2f%%) %u(%.2f%%) %u(%.2f%%) %u(%.2f%%)",
+		 (unsigned)_last_frame.pwm_us[0], (double)(_last_frame.motor_norm[0] * 100.f),
+		 (unsigned)_last_frame.pwm_us[1], (double)(_last_frame.motor_norm[1] * 100.f),
+		 (unsigned)_last_frame.pwm_us[2], (double)(_last_frame.motor_norm[2] * 100.f),
+		 (unsigned)_last_frame.pwm_us[3], (double)(_last_frame.motor_norm[3] * 100.f));
 
 	if (_last_frame.opti_valid) {
 		PX4_INFO("RT opti seq=%lu age_us=%lu pos=(%.4f, %.4f, %.4f) rpy=(%.4f, %.4f, %.4f)",
@@ -252,63 +258,57 @@ void IIM42652::print_status()
 void IIM42652::custom_method(const BusCLIArguments &cli)
 {
 	switch (cli.custom1) {
-	case CLI_CUSTOM_BLDC_AUTO:
-		_bldc_manual_mode.store(static_cast<uint8_t>(BldcManualMode::Auto));
-		PX4_INFO("BLDC control mode: auto");
+	case CLI_CUSTOM_RT_ZERO:
+		rt_controller_zero_reference();
+		PX4_INFO("RT controller reference zeroed");
 		break;
 
-	case CLI_CUSTOM_BLDC_STOP:
-		_bldc_manual_mode.store(static_cast<uint8_t>(BldcManualMode::Stop));
+	case CLI_CUSTOM_ESC_CAL_HIGH:
+		_motor_output_mode.store(static_cast<uint8_t>(MotorOutputMode::EscCalHigh));
+		PX4_INFO("ESC calibration output: HIGH (%u us)", (unsigned)PWM_MAX_US);
+		break;
 
-		if (_dshot_initialized) {
-			for (int i = 0; i < BLDC_COUNT; ++i) {
-				up_dshot_motor_command(SERVO_COUNT + i, DShot_cmd_motor_stop, false);
+	case CLI_CUSTOM_ESC_CAL_LOW:
+		_motor_output_mode.store(static_cast<uint8_t>(MotorOutputMode::EscCalLow));
+
+		if (_pwm_initialized) {
+			for (int i = 0; i < MOTOR_COUNT; ++i) {
+				up_pwm_servo_set(i, PWM_MIN_US);
 			}
 
-			up_dshot_trigger();
+			up_pwm_update(_motor_pwm_mask);
 		}
 
-		PX4_INFO("BLDC control mode: stop");
+		PX4_INFO("ESC calibration output: LOW (%u us)", (unsigned)PWM_MIN_US);
 		break;
 
-	case CLI_CUSTOM_BLDC_SET:
-		_bldc_manual_norm_milli.store(math::min(cli.custom2, 1000));
-		_bldc_manual_mode.store(static_cast<uint8_t>(BldcManualMode::Set));
-		PX4_INFO("BLDC control mode: set %.1f%%",
-			 (double)_bldc_manual_norm_milli.load() * 0.1);
+	case CLI_CUSTOM_ESC_TEST: {
+			const int requested_percent = math::constrain(cli.custom2, 0, (int)ESC_TEST_MAX_PERCENT);
+			const uint16_t pwm = PWM_MIN_US + (uint16_t)(((uint32_t)(PWM_MAX_US - PWM_MIN_US) * (uint32_t)requested_percent) / 100U);
+			_esc_test_pwm_us.store(pwm);
+			_motor_output_mode.store(static_cast<uint8_t>(MotorOutputMode::EscTest));
+
+			if (_pwm_initialized) {
+				for (int i = 0; i < MOTOR_COUNT; ++i) {
+					up_pwm_servo_set(i, pwm);
+				}
+
+				up_pwm_update(_motor_pwm_mask);
+			}
+
+			PX4_INFO("ESC test output: %d%% (%u us)", requested_percent, (unsigned)pwm);
+		}
 		break;
 
-	case CLI_CUSTOM_BLDC_STATUS:
+	case CLI_CUSTOM_ESC_CAL_STATUS:
 	default:
 		break;
 	}
 
-	const hrt_abstime now = hrt_absolute_time();
-	const bool dshot_hold_active = _dshot_initialized && now < _dshot_startup_hold_until;
-	const uint16_t manual_norm_milli = _bldc_manual_norm_milli.load();
-
-	const char *manual_mode = "unknown";
-
-	switch (static_cast<BldcManualMode>(_bldc_manual_mode.load())) {
-	case BldcManualMode::Auto:
-		manual_mode = "auto";
-		break;
-
-	case BldcManualMode::Stop:
-		manual_mode = "stop";
-		break;
-
-	case BldcManualMode::Set:
-		manual_mode = "set";
-		break;
-	}
-
-	PX4_INFO("BLDC status: mode=%s manual=%.3f dshot_initialized=%s hold_active=%s hold_remaining_ms=%lu",
-		 manual_mode,
-		 (double)manual_norm_milli / 1000.0,
-		 _dshot_initialized ? "true" : "false",
-		 dshot_hold_active ? "true" : "false",
-		 dshot_hold_active ? (unsigned long)((_dshot_startup_hold_until - now) / 1000) : 0UL);
+	PX4_INFO("ESC output status: output_mode=%s pwm_initialized=%s test_pwm_us=%u",
+		 motor_output_mode_str(_motor_output_mode.load()),
+		 _pwm_initialized ? "true" : "false",
+		 (unsigned)_esc_test_pwm_us.load());
 }
 
 int IIM42652::probe()
@@ -1096,6 +1096,7 @@ void IIM42652::StartControlLoopIRQ()
 
 	hrt_call_init(&_control_loop_call);
 	rt_control_state_reset(&_rt_control_state);
+	rt_controller_reset();
 	// Base time is set once before the periodic callback starts to avoid per-cycle init checks.
 	_rt_control_state.t0_us = static_cast<uint64_t>(hrt_absolute_time()) + CONTROL_PERIOD_US;
 	_rt_control_state.last_control_ts_us = 0U;
@@ -1388,12 +1389,8 @@ void IIM42652::TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, 
 		f.motor_norm[i] = motor_norm[i];
 	}
 
-	for (uint8_t i = 0; i < SERVO_COUNT; i++) {
-		f.servo_pwm_us[i] = write_result.servo_pwm_us[i];
-	}
-
-	for (uint8_t i = 0; i < BLDC_COUNT; i++) {
-		f.bldc_dshot[i] = write_result.bldc_dshot[i];
+	for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+		f.pwm_us[i] = write_result.pwm_us[i];
 	}
 
 	f.input_us = input_us;
@@ -1481,6 +1478,7 @@ void IIM42652::PublishTelemetryOutsideIRQ()
 
 	for (int i = 0; i < MOTOR_COUNT; ++i) {
 		msg.motor_norm[i] = frame.motor_norm[i];
+		msg.pwm_us[i] = frame.pwm_us[i];
 	}
 
 	if (_rt_control_telem_pub.publish(msg)) {
@@ -1493,51 +1491,23 @@ void IIM42652::PublishTelemetryOutsideIRQ()
 
 void IIM42652::WriteStep(const float motor_norm[MOTOR_COUNT], ActuatorWriteResult &out)
 {
-	const bool dshot_hold_active = _dshot_initialized && hrt_absolute_time() < _dshot_startup_hold_until;
-	const BldcManualMode manual_mode = static_cast<BldcManualMode>(_bldc_manual_mode.load());
-	const float manual_u = math::constrain((float)_bldc_manual_norm_milli.load() / 1000.f, 0.f, 1.f);
+	(void)motor_norm;
 
-	for (int i = 0; i < SERVO_COUNT; i++) {
-		const float u = math::constrain(motor_norm[i], 0.f, 1.f);
-		const uint16_t pwm = PWM_MIN_US + static_cast<uint16_t>(u * (PWM_MAX_US - PWM_MIN_US));
-		out.servo_pwm_us[i] = pwm;
+	const MotorOutputMode output_mode = static_cast<MotorOutputMode>(_motor_output_mode.load());
+	uint16_t pwm = PWM_MIN_US;
+
+	if (output_mode == MotorOutputMode::EscCalHigh) {
+		pwm = PWM_MAX_US;
+
+	} else if (output_mode == MotorOutputMode::EscTest) {
+		pwm = _esc_test_pwm_us.load();
+	}
+
+	for (int i = 0; i < MOTOR_COUNT; i++) {
+		out.pwm_us[i] = pwm;
 		up_pwm_servo_set(i, pwm);
 	}
-	up_pwm_update(_servo_mask);
-
-	for (int i = 0; i < BLDC_COUNT; i++) {
-		float u = math::constrain(motor_norm[SERVO_COUNT + i], 0.f, 1.f);
-
-		switch (manual_mode) {
-		case BldcManualMode::Auto:
-			break;
-
-		case BldcManualMode::Stop:
-			u = 0.f;
-			break;
-
-		case BldcManualMode::Set:
-			u = manual_u;
-			break;
-		}
-
-		const bool send_motor_stop = dshot_hold_active || (u <= 0.f);
-		const uint16_t dshot_throttle = send_motor_stop ? 0U : static_cast<uint16_t>(u * DSHOT_THROTTLE_MAX);
-		out.bldc_dshot[i] = dshot_throttle;
-
-		if (_dshot_initialized) {
-			if (send_motor_stop) {
-				up_dshot_motor_command(SERVO_COUNT + i, DShot_cmd_motor_stop, false);
-
-			} else {
-				up_dshot_motor_data_set(SERVO_COUNT + i, dshot_throttle, false);
-			}
-		}
-	}
-
-	if (_dshot_initialized) {
-		up_dshot_trigger();
-	}
+	up_pwm_update(_motor_pwm_mask);
 }
 
 bool IIM42652::InitActuatorDirect()
@@ -1546,52 +1516,44 @@ bool IIM42652::InitActuatorDirect()
 		return true;
 	}
 
-	if (up_pwm_servo_init(_servo_mask) < 0) {
+	if (up_pwm_servo_init(_motor_pwm_mask) < 0) {
 		return false;
 	}
 
-	up_pwm_servo_arm(true, _servo_mask);
+	for (int timer = 0; timer < MAX_IO_TIMERS; ++timer) {
+		if ((up_pwm_servo_get_rate_group(timer) & _motor_pwm_mask) == 0) {
+			continue;
+		}
+
+		if (up_pwm_servo_set_rate_group_update(timer, MOTOR_PWM_RATE) < 0) {
+			up_pwm_servo_deinit(_motor_pwm_mask);
+			PX4_ERR("pwm rate init failed (timer=%d rate=%u)", timer, MOTOR_PWM_RATE);
+			return false;
+		}
+	}
+
+	for (int i = 0; i < MOTOR_COUNT; ++i) {
+		up_pwm_servo_set(i, PWM_MIN_US);
+	}
+
+	// Preload minimum-throttle values before enabling the outputs, then
+	// assert them once more immediately after arm to reduce startup transients.
+	up_pwm_servo_arm(true, _motor_pwm_mask);
+
+	for (int i = 0; i < MOTOR_COUNT; ++i) {
+		up_pwm_servo_set(i, PWM_MIN_US);
+	}
+
+	up_pwm_update(_motor_pwm_mask);
 	_pwm_initialized = true;
-
-	const int dshot_init_mask = up_dshot_init(_dshot_mask, DSHOT_PWM_RATE, false);
-
-	if (dshot_init_mask < 0 || ((uint32_t)dshot_init_mask & _dshot_mask) != _dshot_mask) {
-		up_pwm_servo_arm(false, _servo_mask);
-		up_pwm_servo_deinit(_servo_mask);
-		_pwm_initialized = false;
-		PX4_ERR("dshot init failed (ret=%d, req=0x%lx)", dshot_init_mask, (unsigned long)_dshot_mask);
-		return false;
-	}
-
-	if (up_dshot_arm(true) < 0) {
-		up_pwm_servo_arm(false, _servo_mask);
-		up_pwm_servo_deinit(_servo_mask);
-		_pwm_initialized = false;
-		PX4_ERR("dshot arm failed");
-		return false;
-	}
-
-	for (int i = 0; i < BLDC_COUNT; ++i) {
-		up_dshot_motor_command(SERVO_COUNT + i, DShot_cmd_motor_stop, false);
-	}
-
-	up_dshot_trigger();
-	_dshot_startup_hold_until = hrt_absolute_time() + DSHOT_STARTUP_HOLD_US;
-	_dshot_initialized = true;
 	return true;
 }
 
 void IIM42652::DeinitActuatorDirect()
 {
-	if (_dshot_initialized) {
-		up_dshot_arm(false);
-		_dshot_initialized = false;
-		_dshot_startup_hold_until = 0;
-	}
-
 	if (_pwm_initialized) {
-		up_pwm_servo_arm(false, _servo_mask);
-		up_pwm_servo_deinit(_servo_mask);
+		up_pwm_servo_arm(false, _motor_pwm_mask);
+		up_pwm_servo_deinit(_motor_pwm_mask);
 		_pwm_initialized = false;
 	}
 }

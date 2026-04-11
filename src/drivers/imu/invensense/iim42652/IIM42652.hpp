@@ -65,10 +65,12 @@ using namespace InvenSense_IIM42652;
 class IIM42652 : public device::SPI, public I2CSPIDriver<IIM42652>
 {
 public:
-	static constexpr uint8_t CLI_CUSTOM_BLDC_AUTO{1};
-	static constexpr uint8_t CLI_CUSTOM_BLDC_STOP{2};
-	static constexpr uint8_t CLI_CUSTOM_BLDC_SET{3};
-	static constexpr uint8_t CLI_CUSTOM_BLDC_STATUS{4};
+	static constexpr uint8_t CLI_CUSTOM_ESC_CAL_HIGH{1};
+	static constexpr uint8_t CLI_CUSTOM_ESC_CAL_LOW{2};
+	static constexpr uint8_t CLI_CUSTOM_ESC_CAL_STATUS{3};
+	static constexpr uint8_t CLI_CUSTOM_ESC_TEST{4};
+	static constexpr uint8_t CLI_CUSTOM_RT_ZERO{5};
+	static constexpr uint8_t ESC_TEST_MAX_PERCENT{10};
 
 	IIM42652(const I2CSPIDriverConfig &config);
 	~IIM42652() override;
@@ -237,20 +239,17 @@ private:
 
 	// --- realtime control + telemetry ---
 
-	static constexpr uint8_t SERVO_COUNT{static_cast<uint8_t>(RT_CTRL_SERVO_COUNT)};
-	static constexpr uint8_t BLDC_COUNT{static_cast<uint8_t>(RT_CTRL_BLDC_COUNT)};
 	static constexpr uint8_t MOTOR_COUNT{static_cast<uint8_t>(RT_CTRL_MOTOR_COUNT)};
 	static constexpr uint16_t PWM_MIN_US{1000};
 	static constexpr uint16_t PWM_MAX_US{2000};
 	static constexpr uint16_t CONTROL_PERIOD_US{5000}; // 200 Hz
-	static constexpr uint16_t DSHOT_THROTTLE_MAX{1999};
-	static constexpr unsigned DSHOT_PWM_RATE{600000U}; // DSHOT600
-	static constexpr hrt_abstime DSHOT_STARTUP_HOLD_US{3'000'000};
+	static constexpr unsigned MOTOR_PWM_RATE{250U}; // MR-X4 ESC input rate margin below 500 Hz limit
 
-	enum class BldcManualMode : uint8_t {
-		Auto = 0,
-		Stop,
-		Set
+	enum class MotorOutputMode : uint8_t {
+		SafeIdle = 0,
+		EscCalHigh,
+		EscCalLow,
+		EscTest
 	};
 
 	using TelemetryFrame = rt_control_telemetry_frame_t;
@@ -293,12 +292,9 @@ private:
 	uint32_t _opti_sample_counter{0};
 
 	bool _pwm_initialized{false};
-	bool _dshot_initialized{false};
-	uint32_t _servo_mask{(1u << SERVO_COUNT) - 1};
-	uint32_t _dshot_mask{(1u << 4) | (1u << 5)};
-	hrt_abstime _dshot_startup_hold_until{0};
-	px4::atomic<uint8_t> _bldc_manual_mode{static_cast<uint8_t>(BldcManualMode::Stop)};
-	px4::atomic<uint16_t> _bldc_manual_norm_milli{0};
+	uint32_t _motor_pwm_mask{(1u << MOTOR_COUNT) - 1};
+	px4::atomic<uint8_t> _motor_output_mode{static_cast<uint8_t>(MotorOutputMode::SafeIdle)};
+	px4::atomic<uint16_t> _esc_test_pwm_us{PWM_MIN_US};
 	uORB::Publication<rt_control_telemetry_s> _rt_control_telem_pub{ORB_ID(rt_control_telemetry)};
 	uint32_t _telem_publish_count{0};
 	uint32_t _telem_publish_fail_count{0};
@@ -310,8 +306,7 @@ private:
 	volatile bool _fifo_flush_pending{false};
 
 	struct ActuatorWriteResult {
-		uint16_t servo_pwm_us[SERVO_COUNT]{};
-		uint16_t bldc_dshot[BLDC_COUNT]{};
+		uint16_t pwm_us[MOTOR_COUNT]{};
 	};
 
 	bool InitActuatorDirect();

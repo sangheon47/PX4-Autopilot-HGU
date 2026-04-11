@@ -67,7 +67,8 @@ private:
 		uint32_t missed_cycles{0};
 		float accel_m_s2[3]{};
 		float gyro_rad_s[3]{};
-		float motor_norm[6]{};
+		float motor_norm[4]{};
+		uint16_t pwm_us[4]{};
 		float opti_x{0.f};
 		float opti_y{0.f};
 		float opti_z{0.f};
@@ -106,6 +107,7 @@ private:
 		memcpy(payload.accel_m_s2, telemetry.accel_m_s2, sizeof(payload.accel_m_s2));
 		memcpy(payload.gyro_rad_s, telemetry.gyro_rad_s, sizeof(payload.gyro_rad_s));
 		memcpy(payload.motor_norm, telemetry.motor_norm, sizeof(payload.motor_norm));
+		memcpy(payload.pwm_us, telemetry.pwm_us, sizeof(payload.pwm_us));
 		payload.opti_x = telemetry.opti_x;
 		payload.opti_y = telemetry.opti_y;
 		payload.opti_z = telemetry.opti_z;

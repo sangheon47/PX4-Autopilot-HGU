@@ -7,9 +7,7 @@
 extern "C" {
 #endif
 
-#define RT_CTRL_SERVO_COUNT 4U
-#define RT_CTRL_BLDC_COUNT 2U
-#define RT_CTRL_MOTOR_COUNT (RT_CTRL_SERVO_COUNT + RT_CTRL_BLDC_COUNT)
+#define RT_CTRL_MOTOR_COUNT 4U
 #define RT_CTRL_TX_Q_LEN 128U
 
 typedef struct {
@@ -37,8 +35,7 @@ typedef struct {
 	float accel_m_s2[3];
 	float gyro_rad_s[3];
 	float motor_norm[RT_CTRL_MOTOR_COUNT];
-	uint16_t servo_pwm_us[RT_CTRL_SERVO_COUNT];
-	uint16_t bldc_dshot[RT_CTRL_BLDC_COUNT];
+	uint16_t pwm_us[RT_CTRL_MOTOR_COUNT];
 	float opti_x;
 	float opti_y;
 	float opti_z;
@@ -59,6 +56,18 @@ typedef struct {
 } rt_control_state_t;
 
 typedef struct {
+	float tilt_y_deg;
+	float tilt_z_deg;
+	float tilt_y_rel_deg;
+	float tilt_z_rel_deg;
+	float tilt_y_ref_deg;
+	float tilt_z_ref_deg;
+	uint8_t initialized;
+	uint8_t tilt_y_ref_initialized;
+	uint8_t tilt_z_ref_initialized;
+} rt_controller_debug_state_t;
+
+typedef struct {
 	rt_control_telemetry_frame_t q[RT_CTRL_TX_Q_LEN];
 	uint16_t head;
 	uint16_t tail;
@@ -67,6 +76,9 @@ typedef struct {
 
 void rt_control_state_reset(rt_control_state_t *state);
 void rt_control_queue_reset(rt_control_queue_t *queue);
+void rt_controller_reset(void);
+void rt_controller_zero_reference(void);
+void rt_controller_get_debug_state(rt_controller_debug_state_t *out_state);
 
 void rt_controller(const float accel_m_s2[3],
 		   const float gyro_rad_s[3],

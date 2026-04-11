@@ -59,8 +59,13 @@ void IIM42652::print_usage()
 	PRINT_MODULE_USAGE_NAME("iim42652", "driver");
 	PRINT_MODULE_USAGE_SUBCATEGORY("imu");
 	PRINT_MODULE_USAGE_COMMAND("start");
-	PRINT_MODULE_USAGE_COMMAND_DESCR("motor", "Control BLDC outputs from the console");
-	PRINT_MODULE_USAGE_ARG("auto|stop|status|set <0..1>", "BLDC control mode command", true);
+	PRINT_MODULE_USAGE_COMMAND("status");
+	PRINT_MODULE_USAGE_COMMAND("stop");
+	PRINT_MODULE_USAGE_COMMAND_DESCR("zero", "Reset RT controller tilt reference to the current pose");
+	PRINT_MODULE_USAGE_COMMAND_DESCR("esc_calib", "Output ESC calibration throttle levels on PWM motor outputs");
+	PRINT_MODULE_USAGE_COMMAND_DESCR("esc_test", "Apply a capped low-throttle PWM test on PWM motor outputs");
+	PRINT_MODULE_USAGE_ARG("high|low|status", "ESC calibration command", true);
+	PRINT_MODULE_USAGE_ARG("<0..10>", "ESC low-throttle test percent", true);
 	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(false, true);
 	PRINT_MODULE_USAGE_PARAM_INT('R', 0, 0, 35, "Rotation", true);
 	PRINT_MODULE_USAGE_PARAM_INT('C', 0, 0, 35000, "Input clock frequency (Hz)", true);
@@ -107,7 +112,17 @@ extern "C" int iim42652_main(int argc, char *argv[])
 		return ThisDriver::module_status(iterator);
 	}
 
-	if (!strcmp(verb, "motor")) {
+	if (!strcmp(verb, "zero")) {
+		if (iterator.runningInstancesCount() == 0) {
+			PX4_ERR("driver not running");
+			return -1;
+		}
+
+		cli.custom1 = ThisDriver::CLI_CUSTOM_RT_ZERO;
+		return ThisDriver::module_custom_method(cli, iterator);
+	}
+
+	if (!strcmp(verb, "esc_calib")) {
 		if (iterator.runningInstancesCount() == 0) {
 			PX4_ERR("driver not running");
 			return -1;
@@ -116,50 +131,63 @@ extern "C" int iim42652_main(int argc, char *argv[])
 		const int verb_index = find_command_index(argc, argv, verb);
 
 		if (verb_index < 0 || verb_index + 1 >= argc) {
-			PX4_ERR("missing motor subcommand");
+			PX4_ERR("missing esc_calib subcommand");
 			ThisDriver::print_usage();
 			return -1;
 		}
 
 		const char *subcommand = argv[verb_index + 1];
 
-		if (!strcmp(subcommand, "auto")) {
-			cli.custom1 = ThisDriver::CLI_CUSTOM_BLDC_AUTO;
+		if (!strcmp(subcommand, "high")) {
+			cli.custom1 = ThisDriver::CLI_CUSTOM_ESC_CAL_HIGH;
 			return ThisDriver::module_custom_method(cli, iterator);
 		}
 
-		if (!strcmp(subcommand, "stop")) {
-			cli.custom1 = ThisDriver::CLI_CUSTOM_BLDC_STOP;
+		if (!strcmp(subcommand, "low")) {
+			cli.custom1 = ThisDriver::CLI_CUSTOM_ESC_CAL_LOW;
 			return ThisDriver::module_custom_method(cli, iterator);
 		}
 
 		if (!strcmp(subcommand, "status")) {
-			cli.custom1 = ThisDriver::CLI_CUSTOM_BLDC_STATUS;
+			cli.custom1 = ThisDriver::CLI_CUSTOM_ESC_CAL_STATUS;
 			return ThisDriver::module_custom_method(cli, iterator, false);
 		}
 
-		if (!strcmp(subcommand, "set")) {
-			if (verb_index + 2 >= argc) {
-				PX4_ERR("missing motor set value");
-				return -1;
-			}
-
-			char *end = nullptr;
-			const float value = strtof(argv[verb_index + 2], &end);
-
-			if (end == argv[verb_index + 2] || (end && *end != '\0') || !PX4_ISFINITE(value) || value < 0.f || value > 1.f) {
-				PX4_ERR("motor set value must be in [0, 1]");
-				return -1;
-			}
-
-			cli.custom1 = ThisDriver::CLI_CUSTOM_BLDC_SET;
-			cli.custom2 = lroundf(value * 1000.f);
-			return ThisDriver::module_custom_method(cli, iterator);
-		}
-
-		PX4_ERR("unknown motor subcommand");
+		PX4_ERR("unknown esc_calib subcommand");
 		ThisDriver::print_usage();
 		return -1;
+	}
+
+	if (!strcmp(verb, "esc_test")) {
+		if (iterator.runningInstancesCount() == 0) {
+			PX4_ERR("driver not running");
+			return -1;
+		}
+
+		const int verb_index = find_command_index(argc, argv, verb);
+
+		if (verb_index < 0 || verb_index + 1 >= argc) {
+			PX4_ERR("missing esc_test percent");
+			ThisDriver::print_usage();
+			return -1;
+		}
+
+		char *endptr = nullptr;
+		const long percent = strtol(argv[verb_index + 1], &endptr, 10);
+
+		if ((endptr == nullptr) || (*endptr != '\0')) {
+			PX4_ERR("invalid esc_test percent");
+			return -1;
+		}
+
+		if ((percent < 0) || (percent > ThisDriver::ESC_TEST_MAX_PERCENT)) {
+			PX4_ERR("esc_test percent must be between 0 and %u", (unsigned)ThisDriver::ESC_TEST_MAX_PERCENT);
+			return -1;
+		}
+
+		cli.custom1 = ThisDriver::CLI_CUSTOM_ESC_TEST;
+		cli.custom2 = (int)percent;
+		return ThisDriver::module_custom_method(cli, iterator);
 	}
 
 	ThisDriver::print_usage();

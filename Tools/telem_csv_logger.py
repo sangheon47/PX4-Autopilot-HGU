@@ -29,7 +29,7 @@ except ImportError as exc:
 
 
 RT_CONTROL_TUNNEL_PAYLOAD_TYPE = 32768
-PAYLOAD = struct.Struct("<dIIIIII3f3f6f6fIIB7x")
+PAYLOAD = struct.Struct("<dIIIIII3f3f4f4H6fIIB7x")
 
 CSV_FIELDS = [
     "cycle",
@@ -49,8 +49,10 @@ CSV_FIELDS = [
     "motor_2",
     "motor_3",
     "motor_4",
-    "motor_5",
-    "motor_6",
+    "pwm_1",
+    "pwm_2",
+    "pwm_3",
+    "pwm_4",
     "opti_x",
     "opti_y",
     "opti_z",
@@ -114,17 +116,19 @@ def payload_to_row(values):
         "motor_2": values[14],
         "motor_3": values[15],
         "motor_4": values[16],
-        "motor_5": values[17],
-        "motor_6": values[18],
-        "opti_x": values[19],
-        "opti_y": values[20],
-        "opti_z": values[21],
-        "opti_roll": values[22],
-        "opti_pitch": values[23],
-        "opti_yaw": values[24],
-        "opti_seq": values[25],
-        "opti_age_us": values[26],
-        "opti_valid": values[27],
+        "pwm_1": values[17],
+        "pwm_2": values[18],
+        "pwm_3": values[19],
+        "pwm_4": values[20],
+        "opti_x": values[21],
+        "opti_y": values[22],
+        "opti_z": values[23],
+        "opti_roll": values[24],
+        "opti_pitch": values[25],
+        "opti_yaw": values[26],
+        "opti_seq": values[27],
+        "opti_age_us": values[28],
+        "opti_valid": values[29],
     }
 
 

@@ -2,9 +2,9 @@
 
 import argparse
 import csv
-import datetime as dt
 import math
 import os
+import select
 import socket
 import struct
 import sys
@@ -32,7 +32,7 @@ except ImportError as exc:
 
 POSE_PACKET = struct.Struct("<6f")
 RT_CONTROL_TUNNEL_PAYLOAD_TYPE = 32768
-RT_PAYLOAD = struct.Struct("<dIIIIII3f3f6f6fIIB7x")
+RT_PAYLOAD = struct.Struct("<dIIIIII3f3f4f4H6fIIB7x")
 RT_CSV_FIELDS = [
     "cycle",
     "actual_start_s",
@@ -51,8 +51,10 @@ RT_CSV_FIELDS = [
     "motor_2",
     "motor_3",
     "motor_4",
-    "motor_5",
-    "motor_6",
+    "pwm_1",
+    "pwm_2",
+    "pwm_3",
+    "pwm_4",
     "opti_x",
     "opti_y",
     "opti_z",
@@ -66,8 +68,31 @@ RT_CSV_FIELDS = [
 
 
 def default_log_output_path() -> Path:
-    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    return Path(f"rt_telem_{stamp}.csv")
+    return REPO_ROOT / "logs" / "rt_telem_test3.csv"
+
+
+def resolve_serial_device(serial_device: str) -> str:
+    if serial_device != "auto":
+        return serial_device
+
+    candidates = sorted(Path("/dev").glob("ttyACM*")) + sorted(Path("/dev").glob("ttyUSB*"))
+
+    if not candidates:
+        raise SystemExit(
+            "serial auto-detect found no /dev/ttyACM* or /dev/ttyUSB* device. "
+            "Reconnect PX4 USB or pass --serial-device explicitly."
+        )
+
+    selected = str(candidates[0])
+    print(f"serial auto-detect selected {selected}", file=sys.stderr)
+
+    if len(candidates) > 1:
+        print(
+            f"serial auto-detect picked {selected} from {[str(path) for path in candidates]}",
+            file=sys.stderr,
+        )
+
+    return selected
 
 
 def build_mavlink_endpoint(args: argparse.Namespace) -> str:
@@ -77,6 +102,7 @@ def build_mavlink_endpoint(args: argparse.Namespace) -> str:
     if args.mode == "tcp":
         return f"tcp:{args.tcp_host}:{args.tcp_port}"
 
+    args.serial_device = resolve_serial_device(args.serial_device)
     return args.serial_device
 
 
@@ -93,6 +119,13 @@ def open_mavlink_link(args: argparse.Namespace):
         kwargs["baud"] = args.serial_baud
 
     link = mavutil.mavlink_connection(endpoint, **kwargs)
+
+    if args.mode == "serial" and hasattr(link, "port"):
+        try:
+            link.port.write_timeout = 0.2
+        except Exception:
+            pass
+
     print(f"mavlink connected {endpoint}", file=sys.stderr)
     return link
 
@@ -121,6 +154,11 @@ def convert_input_pose(
         roll = math.radians(roll)
         pitch = math.radians(pitch)
         yaw = math.radians(yaw)
+
+    if args.ignore_attitude:
+        roll = 0.0
+        pitch = 0.0
+        yaw = 0.0
 
     return x, y, z, roll, pitch, yaw
 
@@ -159,17 +197,19 @@ def rt_payload_to_row(values: Sequence[float]) -> dict[str, float]:
         "motor_2": values[14],
         "motor_3": values[15],
         "motor_4": values[16],
-        "motor_5": values[17],
-        "motor_6": values[18],
-        "opti_x": values[19],
-        "opti_y": values[20],
-        "opti_z": values[21],
-        "opti_roll": values[22],
-        "opti_pitch": values[23],
-        "opti_yaw": values[24],
-        "opti_seq": values[25],
-        "opti_age_us": values[26],
-        "opti_valid": values[27],
+        "pwm_1": values[17],
+        "pwm_2": values[18],
+        "pwm_3": values[19],
+        "pwm_4": values[20],
+        "opti_x": values[21],
+        "opti_y": values[22],
+        "opti_z": values[23],
+        "opti_roll": values[24],
+        "opti_pitch": values[25],
+        "opti_yaw": values[26],
+        "opti_seq": values[27],
+        "opti_age_us": values[28],
+        "opti_valid": values[29],
     }
 
 
@@ -222,13 +262,13 @@ def main() -> int:
     )
     parser.add_argument("--listen-host", default="0.0.0.0")
     parser.add_argument("--listen-port", type=int, default=38030)
-    parser.add_argument("--angle-unit", choices=["deg", "rad"], default="deg")
-    parser.add_argument("--mode", choices=["udp", "tcp", "serial"], default="serial")
+    parser.add_argument("--angle-unit", choices=["deg", "rad"], default="rad")
+    parser.add_argument("--mode", choices=["udp", "tcp", "serial"], default="udp")
     parser.add_argument("--udp-host", default="192.168.2.1")
     parser.add_argument("--udp-port", type=int, default=14550)
     parser.add_argument("--tcp-host", default="192.168.2.1")
     parser.add_argument("--tcp-port", type=int, default=14550)
-    parser.add_argument("--serial-device", default="/dev/ttyUSB0")
+    parser.add_argument("--serial-device", default="auto")
     parser.add_argument("--serial-baud", type=int, default=921600)
     parser.add_argument("--source-system", type=int, default=200)
     parser.add_argument(
@@ -242,15 +282,19 @@ def main() -> int:
         default=mavutil.mavlink.MAV_ESTIMATOR_TYPE_VISION,
     )
     parser.add_argument("--quality", type=int, default=100)
-    parser.add_argument("--log-output", type=Path)
+    parser.add_argument("--odometry-rate", type=float, default=50.0)
+    parser.add_argument("--ignore-attitude", action="store_true")
+    parser.add_argument("--send-heartbeat", action="store_true")
+    parser.add_argument("--log-output", type=Path, default=default_log_output_path())
     parser.add_argument("--flush-every", type=int, default=200)
     args = parser.parse_args()
 
     link = open_mavlink_link(args)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
     sock.bind((args.listen_host, args.listen_port))
-    sock.settimeout(0.02)
+    sock.setblocking(False)
     print(f"udp pose input bound {args.listen_host}:{args.listen_port}", file=sys.stderr)
 
     log_file = None
@@ -266,31 +310,66 @@ def main() -> int:
     last_report = time.monotonic()
     packets_received = 0
     odom_sent = 0
+    odom_send_failures = 0
+    odom_rate_limited = 0
     last_pose = None
+    last_pose_addr = None
+    last_odometry_send = 0.0
+    odometry_period = 1.0 / args.odometry_rate if args.odometry_rate > 0.0 else 0.0
 
     try:
         while True:
             now = time.monotonic()
-            last_heartbeat = maybe_send_heartbeat(link, now, last_heartbeat)
 
-            try:
-                data, _addr = sock.recvfrom(2048)
-            except socket.timeout:
-                data = None
+            if args.send_heartbeat:
+                last_heartbeat = maybe_send_heartbeat(link, now, last_heartbeat)
 
-            if data is not None:
-                if len(data) == POSE_PACKET.size:
+            readable, _, _ = select.select([sock], [], [], 1.0)
+
+            if readable:
+                drained_packets = 0
+
+                while drained_packets < 256:
+                    try:
+                        data, addr = sock.recvfrom(2048)
+                    except BlockingIOError:
+                        break
+
+                    drained_packets += 1
+
+                    if len(data) != POSE_PACKET.size:
+                        print(f"ignored udp packet len={len(data)} from={addr}", file=sys.stderr)
+                        continue
+
                     raw_pose = POSE_PACKET.unpack(data)
                     sample = convert_input_pose(*raw_pose, args=args)
-                    send_odometry(link, args, sample)
                     packets_received += 1
-                    odom_sent += 1
                     last_pose = sample
+                    last_pose_addr = addr
 
-                else:
-                    print(f"ignored udp packet len={len(data)}", file=sys.stderr)
+                    if packets_received == 1:
+                        print(
+                            f"first udp pose from={addr} "
+                            f"pose=({sample[0]:.3f}, {sample[1]:.3f}, {sample[2]:.3f}, "
+                            f"{sample[3]:.3f}, {sample[4]:.3f}, {sample[5]:.3f})",
+                            file=sys.stderr,
+                        )
 
-            while True:
+                    now = time.monotonic()
+                    send_now = odometry_period <= 0.0 or now >= (last_odometry_send + odometry_period)
+
+                    if send_now:
+                        try:
+                            send_odometry(link, args, sample)
+                            odom_sent += 1
+                            last_odometry_send = now
+                        except Exception as exc:
+                            odom_send_failures += 1
+                            print(f"odometry forward failed: {exc}", file=sys.stderr)
+                    else:
+                        odom_rate_limited += 1
+
+            for _ in range(50):
                 msg = link.recv_match(blocking=False)
 
                 if msg is None:
@@ -314,6 +393,8 @@ def main() -> int:
                 if rows_written % max(args.flush_every, 1) == 0:
                     log_file.flush()
 
+            now = time.monotonic()
+
             if now - last_report >= 1.0:
                 if last_pose is None:
                     pose_text = "last_pose=none"
@@ -324,7 +405,10 @@ def main() -> int:
                     )
 
                 print(
-                    f"udp_packets={packets_received} odom_sent={odom_sent} rows={rows_written} {pose_text}",
+                    f"udp_packets={packets_received} odom_sent={odom_sent} "
+                    f"odom_send_failures={odom_send_failures} odom_rate_limited={odom_rate_limited} "
+                    f"rows={rows_written} "
+                    f"last_addr={last_pose_addr} {pose_text}",
                     file=sys.stderr,
                 )
                 last_report = now

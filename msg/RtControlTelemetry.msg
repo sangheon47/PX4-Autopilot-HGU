@@ -10,7 +10,8 @@ uint32 output_us
 uint32 missed_cycles
 float32[3] accel_m_s2
 float32[3] gyro_rad_s
-float32[6] motor_norm
+float32[4] motor_norm
+uint16[4] pwm_us
 float32 opti_x
 float32 opti_y
 float32 opti_z

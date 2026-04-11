@@ -7,13 +7,13 @@
 
 - CUAV 7-Nano에서 `iim42652`를 활성화하고 사용하지 않는 내장 IMU를 비활성화함
 - 부팅 시 보드 센서 초기화 스크립트에서 `iim42652`를 시작함
-- 드라이버가 PWM/DSHOT 출력을 직접 쓰도록 기본 `pwm_out` 시작을 막음
-- 표준 `dshot start`를 비활성화하고 `iim42652`가 DShot 출력 5-6을 직접 소유하도록 정리함
+- 드라이버가 PWM 출력을 직접 쓰도록 기본 `pwm_out` 시작을 막음
+- `iim42652`가 MR-X4 ESC용 PWM 출력 1-4를 직접 소유하도록 정리함
 - `IIM42652` 내부에 200 Hz 실시간 루프를 추가함
 - 제어기 코드를 `src/lib/rt_control/`로 분리함
 - `rt_control_telemetry` uORB + MAVLink TUNNEL 스트림을 추가함
-- `iim42652 motor auto|stop|status|set <0..1>` 콘솔 명령을 추가함
-- DShot startup hold와 기본 `stop` 모드를 추가함
+- MR-X4 안내에 맞춰 PWM 출력 주파수를 `250 Hz`로 고정함
+- 실험용 모터 구동 명령을 제거하고 `iim42652 esc_calib high|low|status`와 제한된 `iim42652 esc_test <0..10>`만 남김
 
 ## 빠른 시작
 
@@ -99,14 +99,13 @@ iim42652 -s -R 22 start
 
 이후 `IIM42652::InitActuatorDirect()`가 아래를 직접 수행합니다.
 
-- Servo 출력 1-4 초기화
-- DShot 출력 5-6 초기화 및 arm
-- `motor_stop` 전송
-- 약 3초 startup hold 시작
+- PWM 출력 1-4 초기화
+- MR-X4 ESC 입력 주파수를 250 Hz로 설정
+- 저스로틀(`1000 us`) 출력으로 ESC 초기화
 
-현재 `rcS`에서는 표준 `dshot start`를 비활성화해 두었습니다. `iim42652`와 표준
-`dshot`가 동시에 같은 출력 자원을 잡으면 콘솔 명령이 먹지 않는 상태가 생길 수
-있기 때문입니다.
+현재 `rcS`에서는 표준 `pwm_out start`와 `dshot start`를 모두 비활성화해 두었습니다.
+`iim42652`와 표준 출력 드라이버가 동시에 같은 출력 자원을 잡으면 콘솔 명령이
+먹지 않는 상태가 생길 수 있기 때문입니다.
 
 ## 실시간 루프 경로
 
@@ -125,13 +124,12 @@ iim42652 -s -R 22 start
 - 제어기 로직: `src/lib/rt_control/rt_control.c`
 - 루프 주기: `IIM42652.hpp`의 `CONTROL_PERIOD_US`
 - PWM 범위: `IIM42652.hpp`의 `PWM_MIN_US`, `PWM_MAX_US`
-- DSHOT 최대값: `IIM42652.hpp`의 `DSHOT_THROTTLE_MAX`
+- PWM 출력 주파수: `IIM42652.hpp`의 `MOTOR_PWM_RATE`
 - 텔레메트리 MAVLink 스트림: `src/modules/mavlink/streams/RT_CONTROL_TELEMETRY.hpp`
 
 ## 출력 매핑
 
-- Servo 출력: 채널 1-4
-- BLDC DSHOT 출력: 채널 5-6
+- BLDC PWM 출력: 채널 1-4
 
 ## TELEM1 MAVLink 텔레메트리 수신
 
@@ -176,14 +174,7 @@ python3 Tools/telem_csv_logger.py --mode serial --serial-device /dev/ttyUSB0 --s
 OptiTrack UDP `x,y,z,roll,pitch,yaw`를 PX4로 보내고 RT telemetry도 같이 저장하는 예시:
 
 ```bash
-python3 Tools/udp_pose_to_px4.py \
-  --listen-host 0.0.0.0 \
-  --listen-port 38030 \
-  --angle-unit rad \
-  --mode serial \
-  --serial-device /dev/ttyUSB0 \
-  --serial-baud 921600 \
-  --log-output logs/rt_telem.csv
+python3 Tools/udp_pose_to_px4.py
 ```
 
 이 스크립트는 다음을 한 번에 처리합니다.
@@ -195,7 +186,14 @@ python3 Tools/udp_pose_to_px4.py \
 
 중요:
 
-- OptiTrack PC가 이미 `m`와 `rad` 기준으로 보내면 `--angle-unit rad`로 두면 됩니다.
+- 기본값은 다음과 같습니다.
+  - UDP 입력: `0.0.0.0:38030`
+  - 각도 단위: `rad`
+  - MAVLink 링크: UDP `192.168.2.1:14550`
+  - serial 장치 자동 탐지는 `--mode serial`일 때만 사용
+  - CSV 저장: `/home/psh/PX4-Autopilot/logs/rt_telem.csv`
+- OptiTrack PC가 이미 `m`와 `rad` 기준으로 보내면 추가 옵션 없이 그대로 쓰면 됩니다.
+- 장치나 포트를 강제로 바꾸고 싶을 때만 `--udp-host`, `--serial-device`, `--listen-port`, `--angle-unit` 같은 옵션을 주면 됩니다.
 - 같은 serial 포트에서는 보통 `udp_pose_to_px4.py`와 `telem_csv_logger.py`를 동시에 실행하지 않는 편이 안전합니다.
 
 생성된 CSV는 MATLAB `readtable()` 또는 Python `pandas.read_csv()`로 바로 읽을 수 있습니다.
@@ -205,6 +203,28 @@ DroneBridge 설정은 아래처럼 두는 것이 맞습니다.
 - `UART serial protocol`: `MAVLink`
 - `UART baud`: `921600`
 - UDP 수신 포트: 보통 `14550`
+
+## QGC USB 연결 주의
+
+현재 RT telemetry는 `MAVLINK_MODE_ONBOARD`에서 `200 Hz`로 활성화되지만, 이 저장소에서는
+USB CDC 링크에는 해당 스트림을 자동으로 붙이지 않도록 해 두었습니다. 즉:
+
+- TELEM1 같은 companion 링크는 기존처럼 `onboard` 모드에서 RT telemetry 사용
+- USB로 연결한 QGroundControl은 RT telemetry TUNNEL 없이 일반 MAVLink 위주로 동작
+
+만약 USB에서 여전히 연결이 불안정하면 아래 설정도 같이 확인합니다.
+
+```bash
+param show USB_MAV_MODE
+param set USB_MAV_MODE 5
+param save
+reboot
+```
+
+의미:
+
+- `USB_MAV_MODE 5`는 USB 링크를 `config` 프로파일로 사용
+- QGroundControl로 설정/로그 확인만 할 때는 이 값이 더 무난할 수 있음
 
 ## RT 텔레메트리 CSV 저장
 
@@ -236,7 +256,7 @@ CSV 컬럼:
 - `exec_us`, `input_us`, `control_us`, `output_us`
 - `missed_cycles`
 - `accel_x/y/z`, `gyro_x/y/z`
-- `motor_1..motor_6`
+- `motor_1..motor_4`, `pwm_1..pwm_4`
 - `opti_x/y/z`, `opti_roll/pitch/yaw`
 - `opti_seq`, `opti_age_us`, `opti_valid`
 
@@ -322,43 +342,136 @@ PY
 즉 CSV에 저장된 값은 RT 루프에서 만든 값을 바깥으로 꺼내서 기록한 것이고,
 실제 제어 루프와 완전히 분리된 경로로 나갑니다.
 
-## 수동 BLDC 제어
+## ESC High-Low Calibration
 
-MAVLink Console 또는 NSH 셸에서 아래 명령을 사용합니다.
+MAVLink Console 또는 NSH 셸에서 아래 명령만 사용합니다.
 
 ```bash
-iim42652 motor status
-iim42652 motor stop
-iim42652 motor set 0.03
-iim42652 motor set 0.05
-iim42652 motor set 0.10
-iim42652 motor auto
+iim42652 esc_calib status
+iim42652 esc_calib high
+iim42652 esc_calib low
+iim42652 esc_test 3
 ```
 
 의미:
 
-- `status`: 현재 BLDC 모드와 수동 설정값 확인
-- `stop`: BLDC 즉시 정지
-- `set <0..1>`: BLDC를 지정 출력으로 고정
-- `auto`: `rt_controller()` 출력으로 복귀
+- `status`: 현재 ESC calibration 출력 상태 확인
+- `high`: PWM 출력 1-4를 `2000 us`로 고정
+- `low`: PWM 출력 1-4를 `1000 us`로 고정
+- `esc_test <0..10>`: PWM 출력 1-4를 제한된 저출력으로 고정해 회전 여부만 확인
 
-권장 시험 순서:
+아래 순서는 `FC를 USB 등으로 먼저 켜고`, 그 다음에 `ESC 메인 전원`을 넣을 수 있을 때만 성립합니다.
+즉 FC와 ESC가 같은 배터리에서 동시에 올라오는 배선이라면, 소프트웨어로 `high`를 먼저 넣는 방식의
+High-Low calibration은 할 수 없습니다.
+
+분리 전원 구성이 가능할 때의 순서:
 
 ```bash
-iim42652 motor status
-iim42652 motor set 0.03
-# 필요하면 0.05, 0.10 등으로 증가
-iim42652 motor stop
+# 1) FC 전원 인가 후 high 출력 준비
+iim42652 esc_calib high
+
+# 2) 그 상태에서 ESC 쪽 전원 인가
+# 3) 삐~삐~ 소리 뒤 low로 전환
+iim42652 esc_calib low
+
+# 4) ESC 전원 off
 ```
 
-## BLDC 모드 의미
+현재는 이전 실험용 모터 구동 경로를 제거했고, 임의 가변 출력 명령은 없습니다.
+다만 처음 연결 확인을 위해 `iim42652 esc_test <0..10>`만 제한적으로 남겨 두었습니다.
 
-- `stop`: BLDC에 `motor_stop`을 보냄
-- `set`: 지정한 수동 출력값을 사용
-- `auto`: `rt_controller()`가 만든 BLDC 값을 그대로 사용
+같은 배터리로 FC와 ESC가 동시에 켜지는 경우:
 
-현재 `src/lib/rt_control/rt_control.c`에서는 BLDC 출력이 `0.5`, `0.5`로
-고정되어 있으므로, 지금의 `auto`는 사실상 50% 고정 출력처럼 동작합니다.
+- `iim42652 esc_calib high`를 먼저 넣어도 ESC는 이미 전원이 들어온 뒤라 calibration 시작 조건을 놓칩니다.
+- 이 경우 처음 연결 확인은 `low(1000 us)` 유지 상태에서 ESC 부팅음과 모터 정지만 확인합니다.
+- High-Low calibration이 꼭 필요하면 FC를 USB 또는 별도 5V로 먼저 켠 뒤 ESC 메인 전원을 나중에 넣을 수 있어야 합니다.
+
+## 처음 ESC/모터 연결 후 테스트
+
+처음 배선했을 때는 반드시 프로펠러를 제거한 상태에서 확인합니다.
+
+현재 펌웨어에서는 실시간 제어기 출력이 실제 모터 PWM으로 전달되지 않으므로,
+처음 연결 후 테스트 목적은 아래 세 가지만 확인하는 것입니다.
+
+- 평상시 PWM `1000 us`가 정상적으로 유지되는지
+- 필요할 때만 High-Low calibration이 되는지
+- 제한된 저출력에서만 짧게 회전 확인이 되는지
+
+권장 순서:
+
+```bash
+# 1) FC만 먼저 켜기
+# USB 또는 FC 전원만 인가하고 ESC 메인 전원은 아직 넣지 않음
+
+# 2) 현재 출력 상태 확인
+iim42652 status
+iim42652 esc_calib status
+```
+
+이때 확인할 점:
+
+- `iim42652 esc_calib status`가 `low` 또는 idle 상태여야 함
+- `iim42652 status`의 `pwm_us`가 4채널 모두 `1000 us`여야 함
+- 이 상태는 MR-X4 기준 최소 스로틀, 즉 `0%` 명령 상태임
+
+다음으로 ESC와 모터를 처음 연결한 상태를 확인합니다.
+
+```bash
+# 3) low 상태를 한 번 더 명시
+iim42652 esc_calib low
+
+# 4) 그 다음 ESC 메인 전원 인가
+```
+
+정상이라면:
+
+- ESC 초기음만 나고 모터는 돌지 않아야 함
+- `1000 us`가 유지되는 동안 모터가 계속 돌면 배선, ESC 설정, calibration 상태를 다시 확인해야 함
+
+저출력 회전 확인이 필요하면 아래처럼 아주 작게만 확인합니다.
+
+```bash
+# 5) 프로펠러 제거 상태에서만 수행
+iim42652 esc_test 3
+
+# 모터가 안 돌면 필요할 때만 5, 8, 10 순서로 아주 짧게 확인
+# 예: iim42652 esc_test 5
+
+# 6) 확인이 끝나면 즉시 low로 복귀
+iim42652 esc_calib low
+```
+
+권장:
+
+- 처음에는 `3%`부터 시작
+- 꼭 필요할 때만 `5%`, `8%`, `10%` 순으로 올림
+- `10%`를 넘는 테스트는 현재 펌웨어에서 허용하지 않음
+- 회전 확인은 아주 짧게만 하고 바로 `low`로 내림
+
+High-Low calibration이 필요하면 아래 순서로 진행합니다.
+이 절차는 FC와 ESC 전원을 분리해서 순서를 만들 수 있을 때만 가능합니다.
+
+```bash
+# 5) ESC 전원을 끈 상태에서 high 준비
+iim42652 esc_calib high
+
+# 6) ESC 메인 전원 인가
+# 7) 삐~삐~ 소리 뒤 low로 전환
+iim42652 esc_calib low
+
+# 8) ESC 전원 off
+```
+
+Calibration 후 재확인:
+
+- ESC 전원을 다시 넣었을 때 모터가 자동으로 돌지 않아야 함
+- `iim42652 status`에서 `pwm_us`는 다시 `1000 us` 4채널로 보여야 함
+
+중요:
+
+- `esc_test`는 회전 확인용으로만 남겨 둔 제한 명령입니다.
+- 현재 펌웨어에서 `esc_test`는 `0..10%` 범위만 허용합니다.
+- 실제 추력 시험이나 연속 구동은 별도 제어 경로를 다시 넣기 전까지 수행하지 않습니다.
 
 ## 부팅 후 확인
 
@@ -371,22 +484,17 @@ iim42652 status
 출력에서 보게 되는 주요 항목:
 
 - `RT period_us=5000`
-- `manual_mode`
+- `output_mode`
 - `RT telem topic=rt_control_telemetry advertised=true`
-- `manual`
-- `hold_active`
 - cycle 카운터
 - input/control/output/exec 시간
 - 가속도/자이로 값
-- PWM/DSHOT 출력 값
+- PWM 출력 값
 
 상태 확인 팁:
 
-- 수동 제어 상태 확인은 `iim42652 motor status`가 가장 직접적입니다.
-- `iim42652 status`의 `manual_mode`, `manual`, `bldc_dshot`도 참고할 수 있습니다.
-- 현재 `iim42652 status`의 BLDC 퍼센트 표시는 최종 override 출력과 완전히
-  일치하지 않을 수 있으므로, 수동 출력 확인은 `motor status`와 실제
-  `bldc_dshot` 값을 함께 보는 편이 낫습니다.
+- ESC calibration 상태 확인은 `iim42652 esc_calib status`가 가장 직접적입니다.
+- `iim42652 status`의 `output_mode`, `pwm_us`도 같이 볼 수 있습니다.
 
 ## 권장 브랜치 구조
 
