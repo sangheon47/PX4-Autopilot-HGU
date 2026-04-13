@@ -56,9 +56,8 @@
 #include <uORB/topics/rt_control_telemetry.h>
 #include <uORB/topics/vehicle_odometry.h>
 
-extern "C" {
-#include <rt_control/rt_control.h>
-}
+#include "include/control_main.h"
+#include "include/control_telemetry.h"
 
 using namespace InvenSense_IIM42652;
 
@@ -69,7 +68,7 @@ public:
 	static constexpr uint8_t CLI_CUSTOM_ESC_CAL_LOW{2};
 	static constexpr uint8_t CLI_CUSTOM_ESC_CAL_STATUS{3};
 	static constexpr uint8_t CLI_CUSTOM_ESC_TEST{4};
-	static constexpr uint8_t CLI_CUSTOM_RT_ZERO{5};
+	static constexpr uint8_t CLI_CUSTOM_RT_AUTO{5};
 	static constexpr uint8_t ESC_TEST_MAX_PERCENT{10};
 
 	IIM42652(const I2CSPIDriverConfig &config);
@@ -237,44 +236,42 @@ private:
 		{ Register::BANK_2::ACCEL_CONFIG_STATIC4, ACCEL_CONFIG_STATIC4_BIT::ACCEL_AAF_BITSHIFT_585HZ_SET | ACCEL_CONFIG_STATIC4_BIT::ACCEL_AAF_DELTSQR_MSB_SET, ACCEL_CONFIG_STATIC4_BIT::ACCEL_AAF_BITSHIFT_585HZ_CLEAR | ACCEL_CONFIG_STATIC4_BIT::ACCEL_AAF_DELTSQR_MSB_CLEAR },
 	};
 
-	// --- realtime control + telemetry ---
+	// --- 7-nano low-level realtime stack ---
+	// These constants define the direct sensor -> controller -> actuator path.
 
-	static constexpr uint8_t MOTOR_COUNT{static_cast<uint8_t>(RT_CTRL_MOTOR_COUNT)};
+	static constexpr uint8_t MOTOR_COUNT{static_cast<uint8_t>(MOTOR_NUM)};
 	static constexpr uint16_t PWM_MIN_US{1000};
 	static constexpr uint16_t PWM_MAX_US{2000};
-	static constexpr uint16_t CONTROL_PERIOD_US{5000}; // 200 Hz
 	static constexpr unsigned MOTOR_PWM_RATE{250U}; // MR-X4 ESC input rate margin below 500 Hz limit
 
 	enum class MotorOutputMode : uint8_t {
 		SafeIdle = 0,
 		EscCalHigh,
 		EscCalLow,
-		EscTest
+		EscTest,
+		Auto
 	};
 
-	using TelemetryFrame = rt_control_telemetry_frame_t;
+	using TelemFrame = telem_frame_t;
 
-	TelemetryFrame _last_frame{}; // status 출력용(가장 최근 주기)
+	TelemFrame _last_frame{}; // Most recent fast-loop frame for CLI status output.
 
-	float _latest_accel_m_s2[3]{};
-	float _latest_gyro_rad_s[3]{};
-	struct LatestPublishSample {
+	// Fast-loop IMU sample cache used by the controller and PX4 publish bridge.
+	imu_regs_t _latest_imu{};
+	float _latest_accel[3]{};
+	float _latest_gyro[3]{};
+	struct LatestSample {
 		hrt_abstime timestamp_sample{0};
 		float accel_raw[3]{};
 		float gyro_raw[3]{};
-		float temperature_degC{0.f};
+		float temperature{0.f};
 	};
-	LatestPublishSample _latest_publish_sample{};
+	LatestSample _latest_sample{};
 	px4::atomic<uint32_t> _latest_publish_seq{0}; // odd: writer in progress, even: stable
 	uint32_t _published_seq{0};
-	struct PendingTelemetry {
-		hrt_abstime timestamp{0};
-		TelemetryFrame frame{};
-	};
-	PendingTelemetry _pending_telem{};
-	px4::atomic<uint32_t> _pending_telem_seq{0}; // odd: writer in progress, even: stable
-	uint32_t _published_telem_seq{0};
-	struct LatestOptiSample {
+
+	// External navigation/input cache. Visual odometry is first; RC/GPS/baro can follow here.
+	struct LatestOpti {
 		hrt_abstime timestamp_sample{0};
 		float x{0.f};
 		float y{0.f};
@@ -287,47 +284,54 @@ private:
 	};
 	static constexpr uint32_t OPTI_TIMEOUT_US{200000}; // stale sample cutoff for telemetry valid flag
 	uORB::Subscription _vehicle_visual_odometry_sub{ORB_ID(vehicle_visual_odometry)};
-	LatestOptiSample _latest_opti_sample{};
+	LatestOpti _latest_opti{};
 	px4::atomic<uint32_t> _latest_opti_sample_seq{0}; // odd: writer in progress, even: stable
 	uint32_t _opti_sample_counter{0};
 
+	// Direct PWM output state for the low-level actuator path.
 	bool _pwm_initialized{false};
 	uint32_t _motor_pwm_mask{(1u << MOTOR_COUNT) - 1};
-	px4::atomic<uint8_t> _motor_output_mode{static_cast<uint8_t>(MotorOutputMode::SafeIdle)};
-	px4::atomic<uint16_t> _esc_test_pwm_us{PWM_MIN_US};
-	uORB::Publication<rt_control_telemetry_s> _rt_control_telem_pub{ORB_ID(rt_control_telemetry)};
-	uint32_t _telem_publish_count{0};
-	uint32_t _telem_publish_fail_count{0};
+	px4::atomic<uint8_t> _motor_output_mode{static_cast<uint8_t>(MotorOutputMode::Auto)};
+	px4::atomic<uint16_t> _esc_test_pwm{PWM_MIN_US};
 
-	rt_control_state_t _rt_control_state{};
+	// Slow-side telemetry publication health.
+	uORB::Publication<rt_control_telemetry_s> _telem_pub{ORB_ID(rt_control_telemetry)};
+	uint32_t _telem_pub_ok{0};
+	uint32_t _telem_pub_fail{0};
+
+	// Fast-loop scheduler and reset coordination.
+	loop_state_t _loop_state{};
 	hrt_call _control_loop_call{};
 	bool _control_loop_running{false};
 	volatile bool _request_reset{false};
 	volatile bool _fifo_flush_pending{false};
 
-	struct ActuatorWriteResult {
-		uint16_t pwm_us[MOTOR_COUNT]{};
+	struct ActuatorWrite {
+		uint16_t pwm[MOTOR_COUNT]{};
 	};
 
+	// Direct actuator output. Implemented in IIM42652_actuator.cpp.
 	bool InitActuatorDirect();
 	void DeinitActuatorDirect();
-	void WriteStep(const float motor_norm[MOTOR_COUNT], ActuatorWriteResult &out);
+	void WriteStep(const control_output_t &out_cmd, ActuatorWrite &out);
 
-	void QueueTelemetryForPublish(const TelemetryFrame &frame, hrt_abstime timestamp);
-	void PublishTelemetryOutsideIRQ();
+	// Slow-side publish bridge. Implemented in IIM42652_bridge.cpp.
 	void PublishSampleOutsideIRQ();
-	void UpdateLatestOptiSampleOutsideIRQ();
-	bool CopyLatestOptiSample(LatestOptiSample &sample) const;
-	rt_control_opti_sample_t BuildRtControlOptiSample(const hrt_abstime &cycle_begin,
-			const LatestOptiSample &sample) const;
+	void PublishTelemetryOutsideIRQ();
+	void TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input, uint32_t control, uint32_t output,
+			  const float motor[MOTOR_COUNT], const ActuatorWrite &actuator,
+			  const opti_sample_t &opti);
 
-	void TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input_us, uint32_t control_us, uint32_t output_us,
-			  const float motor_norm[MOTOR_COUNT], const ActuatorWriteResult &write_result,
-			  const rt_control_opti_sample_t &opti_sample);
-	bool ReadSampleDirect(const hrt_abstime &timestamp_sample);
+	// External input cache. Implemented in IIM42652_bridge.cpp.
+	void UpdateLatestOptiSampleOutsideIRQ();
+	bool CopyLatestOptiSample(LatestOpti &sample) const;
+	opti_sample_t BuildOptiSample(const hrt_abstime &cycle_begin, const LatestOpti &sample) const;
+
+	// Fast-loop execution. Implemented in IIM42652_rt_loop.cpp.
 	static void ControlLoopTrampoline(void *arg);
 	void ControlLoopIRQ();
 	void StartControlLoopIRQ();
 	void StopControlLoopIRQ();
+	bool ReadSampleDirect(const hrt_abstime &timestamp_sample);
 
 };

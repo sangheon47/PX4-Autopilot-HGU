@@ -41,6 +41,8 @@ add_subdirectory(rangefinder)
 add_subdirectory(smbus)
 add_subdirectory(smbus_sbs)
 
-if (${PX4_PLATFORM} STREQUAL "nuttx")
+if (${PX4_PLATFORM} STREQUAL "nuttx"
+	AND EXISTS "${PX4_SOURCE_DIR}/src/drivers/gpio/mcp23009/MCP23009.cpp"
+	AND EXISTS "${PX4_SOURCE_DIR}/src/drivers/gpio/mcp23017/MCP23017.cpp")
 	add_subdirectory(mcp_common)
 endif()

@@ -86,7 +86,6 @@ target_link_libraries(px4 PRIVATE uORB)
 install(
 	DIRECTORY
 		${PROJECT_SOURCE_DIR}/posix-configs
-		${PROJECT_SOURCE_DIR}/test
 		${PX4_BINARY_DIR}/etc
 		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 	DESTINATION
@@ -128,12 +127,14 @@ elseif("${PX4_BOARD}" MATCHES "emlid_navio2")
 
 elseif("${PX4_BOARD}" MATCHES "sitl")
 
-	# vscode launch.json
-	if(${PX4_BOARD_LABEL} MATCHES "replay")
-		configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Debug/launch_replay.json.in ${PX4_SOURCE_DIR}/.vscode/launch.json COPYONLY)
+	if(EXISTS "${PX4_SOURCE_DIR}/.vscode")
+		# vscode launch.json
+		if(${PX4_BOARD_LABEL} MATCHES "replay")
+			configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Debug/launch_replay.json.in ${PX4_SOURCE_DIR}/.vscode/launch.json COPYONLY)
 
-	else()
-		configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Debug/launch_sitl.json.in ${PX4_SOURCE_DIR}/.vscode/launch.json COPYONLY)
+		else()
+			configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Debug/launch_sitl.json.in ${PX4_SOURCE_DIR}/.vscode/launch.json COPYONLY)
+		endif()
 	endif()
 
 	set(SITL_WORKING_DIR ${PX4_BINARY_DIR}/rootfs)
@@ -141,7 +142,7 @@ elseif("${PX4_BOARD}" MATCHES "sitl")
 	configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Debug/posix.lldbinit ${SITL_WORKING_DIR}/.lldbinit COPYONLY)
 	configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Debug/posix.gdbinit ${SITL_WORKING_DIR}/.gdbinit COPYONLY)
 
-	if(BUILD_TESTING)
+	if(BUILD_TESTING AND EXISTS "${PX4_SOURCE_DIR}/platforms/posix/cmake/sitl_tests.cmake")
 		include(sitl_tests)
 	endif()
 
@@ -155,43 +156,67 @@ elseif("${PX4_BOARD}" MATCHES "sitl")
 
 	# install
 
+	set(px4_install_dirs ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+	if(EXISTS "${PROJECT_SOURCE_DIR}/integrationtests")
+		list(APPEND px4_install_dirs ${PROJECT_SOURCE_DIR}/integrationtests)
+	endif()
+
+	if(EXISTS "${PROJECT_SOURCE_DIR}/launch")
+		list(APPEND px4_install_dirs ${PROJECT_SOURCE_DIR}/launch)
+	endif()
+
 	# px4 dirs
 	install(
-		DIRECTORY
-			${PROJECT_SOURCE_DIR}/integrationtests
-			${PROJECT_SOURCE_DIR}/launch
-			${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+		DIRECTORY ${px4_install_dirs}
 		DESTINATION
 			${PROJECT_NAME}
 		USE_SOURCE_PERMISSIONS
 		)
+
+	set(px4_install_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt)
+
+	if(EXISTS "${PROJECT_SOURCE_DIR}/package.xml")
+		list(APPEND px4_install_files ${PROJECT_SOURCE_DIR}/package.xml)
+	endif()
 
 	# px4 files
 	install(
-		FILES
-			${PROJECT_SOURCE_DIR}/CMakeLists.txt
-			${PROJECT_SOURCE_DIR}/package.xml
+		FILES ${px4_install_files}
 		DESTINATION
 			${PROJECT_NAME}
 		)
 
-	# px4 Tools dirs
-	install(
-		DIRECTORY
-			${PROJECT_SOURCE_DIR}/Tools/ecl_ekf
-		DESTINATION
-			${PROJECT_NAME}/Tools
-		USE_SOURCE_PERMISSIONS
-		)
+	set(px4_tools_dirs)
 
-	# px4 Tools files
-	install(
-		PROGRAMS
-			${PROJECT_SOURCE_DIR}/Tools/simulation/gazebo-classic/setup_gazebo.bash
-			${PROJECT_SOURCE_DIR}/Tools/upload_log.py
-		DESTINATION
-			${PROJECT_NAME}/Tools
-		)
+	if(EXISTS "${PROJECT_SOURCE_DIR}/Tools/ecl_ekf")
+		list(APPEND px4_tools_dirs ${PROJECT_SOURCE_DIR}/Tools/ecl_ekf)
+	endif()
+
+	if(px4_tools_dirs)
+		# px4 Tools dirs
+		install(
+			DIRECTORY ${px4_tools_dirs}
+			DESTINATION
+				${PROJECT_NAME}/Tools
+			USE_SOURCE_PERMISSIONS
+			)
+	endif()
+
+	set(px4_tools_programs)
+
+	if(EXISTS "${PROJECT_SOURCE_DIR}/Tools/upload_log.py")
+		list(APPEND px4_tools_programs ${PROJECT_SOURCE_DIR}/Tools/upload_log.py)
+	endif()
+
+	if(px4_tools_programs)
+		# px4 Tools files
+		install(
+			PROGRAMS ${px4_tools_programs}
+			DESTINATION
+				${PROJECT_NAME}/Tools
+			)
+	endif()
 
 	# ROMFS files
 	install(
@@ -201,13 +226,15 @@ elseif("${PX4_BOARD}" MATCHES "sitl")
 			${PROJECT_NAME}/build/px4_sitl_default
 		)
 
-	# gazebo files
-	install(
-		FILES
-			${PROJECT_SOURCE_DIR}/Tools/simulation/gz/server.config
-		DESTINATION
-			${PROJECT_NAME}/Tools/simulation/gz
-		)
+	if(EXISTS "${PROJECT_SOURCE_DIR}/Tools/simulation/gz/server.config")
+		# gazebo files
+		install(
+			FILES
+				${PROJECT_SOURCE_DIR}/Tools/simulation/gz/server.config
+			DESTINATION
+				${PROJECT_NAME}/Tools/simulation/gz
+			)
+	endif()
 
 	# gazebo dirs
 	install(
@@ -215,7 +242,7 @@ elseif("${PX4_BOARD}" MATCHES "sitl")
 			${PROJECT_SOURCE_DIR}/Tools/simulation/gz/models
 			${PROJECT_SOURCE_DIR}/Tools/simulation/gz/worlds
 		DESTINATION
-			${PROJECT_NAME}/Tools/simulation/gazebo-classic/sitl_gazebo-classic
+			${PROJECT_NAME}/Tools/simulation/gz
 		OPTIONAL
 		)
 

@@ -207,7 +207,7 @@ source "src/systemcmds/Kconfig"
 endmenu
 
 menu "examples"
-source "src/examples/Kconfig"
+osource "src/examples/Kconfig"
 endmenu
 
 menu "platforms"

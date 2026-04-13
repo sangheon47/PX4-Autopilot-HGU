@@ -86,14 +86,6 @@ add_custom_target(metadata_parameters
 	USES_TERMINAL
 )
 
-add_custom_target(metadata_module_documentation
-	COMMAND ${CMAKE_COMMAND} -E make_directory ${PX4_BINARY_DIR}/docs
-	COMMAND ${PYTHON_EXECUTABLE} ${PX4_SOURCE_DIR}/Tools/px_process_module_doc.py -v --src-path ${PX4_SOURCE_DIR}/src
-		--markdown ${PX4_BINARY_DIR}/docs/modules
-	COMMENT "Generating module documentation"
-	USES_TERMINAL
-)
-
 set(events_src_path "${PX4_SOURCE_DIR}/src/lib/events")
 add_custom_target(metadata_extract_events
 	COMMAND ${CMAKE_COMMAND} -E make_directory ${PX4_BINARY_DIR}/events
@@ -117,6 +109,5 @@ add_custom_target(all_metadata
 	DEPENDS
 		metadata_airframes
 		metadata_parameters
-		metadata_module_documentation
 		metadata_extract_events
 )

@@ -1,0 +1,7 @@
+#!/bin/sh
+#
+# CUAV 7-Nano minimal runtime selector
+#------------------------------------------------------------------------------
+
+set CUAV7_MINIMAL yes
+set CUAV7_AUTOSTART 22010

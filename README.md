@@ -1,100 +1,94 @@
-# PX4-Autopilot-HGU
+# PX4-Autopilot-7-Nano
 
-이 저장소는 `CUAV 7-Nano + IIM42652` 직접 실시간 루프 실험을 위해 정리한
-PX4 포크입니다.
+`CUAV 7-Nano`와 `PX4 SITL`만 남긴 경량 PX4 레포입니다.
 
-현재 이 저장소에서는 아래 2개 브랜치 구조를 기준으로 사용합니다.
+루트를 열면 가장 먼저 봐야 하는 파일은 `main.cpp`입니다.
+이 파일이 7-nano 실시간 제어 메인 사이클이고, raw IMU register decode부터 PWM 계산까지 직접 담고 있습니다.
+`IIM42652.cpp`는 IMU IRQ에서 SPI 전송과 telemetry/PWM 출력을 처리하는 하드웨어 래퍼입니다.
+루프 주기, 샘플타임, 런타임, 정적 로그 배열 크기는 루트 `main.cpp` 상단 `#define` 블록에서 같이 바꿉니다.
 
-- `team`: 팀이 함께 쓰는 메인 작업 브랜치
-- `share`: 필요할 때만 남겨두는 보존용 기준 브랜치
+지원 대상:
 
-즉 평소 작업은 거의 전부 `team`에서 하고, `share`는 꼭 필요할 때만 기준점으로
-남겨두는 방식입니다.
+- `cuav_7-nano_minimal`
+- `px4_sitl_default`
 
-## 빠른 시작
+남겨둔 목적:
 
-```bash
-git clone git@github.com:sangheon47/PX4-Autopilot-HGU.git
-cd PX4-Autopilot-HGU
-# 현재 브랜치가 team이 아니라면 아래 줄 실행
-# git switch --track origin/team
-make cuav_7-nano_default
-```
+- 7-Nano 펌웨어 빌드 및 업로드
+- IMU 기반 저수준 실시간 제어 실험
+- MAVLink/QGC 연결
+- Bullet Interceptor shell 기반 GZ SITL 확인
 
-빌드 결과물:
+루트에서 의도적으로 제거한 것:
 
-```bash
-build/cuav_7-nano_default/cuav_7-nano_default.px4
-```
+- 다른 보드들
+- `qurt`, `ros2` 플랫폼
+- 문서/테스트/CI/ROS 보조 파일
+- `flightgear`, `gazebo-classic`, `jmavsim`, `jsbsim` 시뮬레이터
+- 대부분의 GZ 예제 모델과 world
 
-부팅 후 확인:
-
-```bash
-iim42652 status
-```
-
-## 현재 출력 구조
-
-- `iim42652`는 부팅 시 `boards/cuav/7-nano/init/rc.board_sensors`에서 자동 시작됩니다.
-- `iim42652` 드라이버가 Servo 출력 1-4와 BLDC DShot 출력 5-6을 직접 초기화하고 제어합니다.
-- `ROMFS/px4fmu_common/init.d/rcS`의 표준 `dshot start`는 출력 소유권 충돌을 막기 위해 비활성화되어 있습니다.
-- BLDC는 기본 모드가 `stop`이며, 드라이버 시작 직후 약 3초 동안 startup hold가 걸립니다.
-
-## MAVLink Console 수동 BLDC 제어
-
-MAVLink Console 또는 NSH 셸에서 아래 명령으로 BLDC(DShot, 채널 5-6)를 수동 제어할 수 있습니다.
+## Build
 
 ```bash
-iim42652 motor status
-iim42652 motor stop
-iim42652 motor set 0.03
-iim42652 motor set 0.05
-iim42652 motor set 0.10
-iim42652 motor auto
+make cuav_7-nano_minimal
+make px4_sitl_default
 ```
 
-의미:
-
-- `iim42652 motor status`: 현재 모드와 수동 설정값 확인
-- `iim42652 motor stop`: BLDC 강제 정지
-- `iim42652 motor set <0..1>`: BLDC를 지정 출력으로 고정
-- `iim42652 motor auto`: `rt_controller()` 출력으로 복귀
-
-권장 시험 순서:
+생성물:
 
 ```bash
-iim42652 motor status
-iim42652 motor set 0.03
-# 필요하면 0.05, 0.10 등으로 증가
-iim42652 motor stop
+build/cuav_7-nano_minimal/cuav_7-nano_minimal.px4
+build/px4_sitl_default/bin/px4
 ```
 
-추가 메모:
+업로드:
 
-- `auto`는 `rt_controller()`가 만든 값을 그대로 사용합니다.
-- 현재 `src/lib/rt_control/rt_control.c`에서는 BLDC 출력이 `0.5`, `0.5`로 고정되어 있어 `auto`는 사실상 50% 고정 출력처럼 동작합니다.
-- `iim42652 status`의 `manual_mode`, `manual`, `bldc_dshot`는 참고할 수 있지만, BLDC 퍼센트 표시는 현재 최종 override 출력과 완전히 일치하지 않을 수 있습니다.
+```bash
+make cuav_7-nano_minimal upload
+```
 
-## 자세한 문서
+## Main Paths
 
-실시간 루프 구조, 수정 포인트, 협업 방식, 다른 팀이 fork해서 쓰는 구조는 아래
-문서를 보면 됩니다.
-
-- [README_HGU.md](README_HGU.md)
-- `TELEM1 MAVLink` 수신, `DroneBridge` 설정, `rt_telem.csv` 저장 방법도 `README_HGU.md`에 정리되어 있습니다.
-
-## 주요 파일
-
-- `boards/cuav/7-nano/default.px4board`
-- `boards/cuav/7-nano/init/rc.board_sensors`
-- `ROMFS/px4fmu_common/init.d/rcS`
+- `main.cpp`
+- `include/control_main.h`
+- `include/control_telemetry.h`
+- `include/control_telemetry.cpp`
+- `boards/cuav/7-nano`
+- `boards/px4/sitl`
 - `src/drivers/imu/invensense/iim42652/IIM42652.cpp`
-- `src/drivers/imu/invensense/iim42652/IIM42652.hpp`
-- `src/lib/rt_control/rt_control.c`
-- `src/lib/rt_control/rt_control.h`
+- `src/drivers/imu/invensense/iim42652/IIM42652_rt_loop.cpp`
+- `src/drivers/imu/invensense/iim42652/IIM42652_bridge.cpp`
+- `ROMFS/px4fmu_common/init.d/rcS`
+- `boards/cuav/7-nano/init/rc.minimal`
+- `boards/cuav/7-nano/minimal.px4board`
+- `Tools/simulation/gz/models/bullet_interceptor`
 
-## 참고
+가장 먼저 볼 파일:
 
-- 이 저장소는 공식 PX4를 기반으로 한 포크입니다.
-- 공식 PX4 원본 저장소: <https://github.com/PX4/PX4-Autopilot>
-- 공식 PX4 문서: <https://docs.px4.io/main/en/>
+- `main.cpp`: raw IMU register decode -> SI 단위 변환 -> 모터 명령 -> 4개 ESC PWM 목표 생성, loop Hz/period/sample time 설정
+- `include/control_main.h`: main.cpp와 드라이버가 공유하는 최소 입출력 타입
+- `include/control_telemetry.h`, `include/control_telemetry.cpp`: telemetry queue와 shared telemetry 타입
+- `src/drivers/imu/invensense/iim42652/IIM42652_rt_loop.cpp`: IMU 읽기 -> main.cpp 호출
+- `src/drivers/imu/invensense/iim42652/IIM42652_bridge.cpp`: queue -> uORB telemetry publish bridge
+- `ROMFS/px4fmu_common/init.d-posix/airframes/22000_gz_bullet_interceptor`: Bullet Interceptor SITL 시작점
+
+## Remaining Runtime Pieces
+
+7-nano minimal 빌드에 실제로 남겨둔 핵심은 아래 정도입니다.
+
+- `iim42652`
+- `gps`
+- `bmp581`, `icp201xx`
+- `ist8310`, `iis2mdc`
+- `mavlink`, `dataman`
+- `netman`, `param`, `perf`, `reboot`, `uorb`, `listener`, `ver`, `work_queue`
+
+GZ 쪽은 아래만 남겨뒀습니다.
+
+- `Tools/simulation/gz/models/bullet_interceptor`
+- `Tools/simulation/gz/models/airspeed`
+- `Tools/simulation/gz/worlds/default.sdf`
+
+## Note
+
+이 레포는 범용 PX4 개발용이 아니라, `7-Nano + 저수준 제어 + Bullet Interceptor SITL`만을 위해 줄여둔 작업용 트리입니다.

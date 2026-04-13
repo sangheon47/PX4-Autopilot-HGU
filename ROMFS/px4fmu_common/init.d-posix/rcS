@@ -17,12 +17,12 @@ PATH="$PATH:${R}etc/init.d-posix"
 # Main SITL startup script
 #
 
-# check for ekf2 replay
+# replay is intentionally not kept in this lightweight repo
 # shellcheck disable=SC2154
 if [ "$replay_mode" = "ekf2" ]
 then
-	. ${R}etc/init.d-posix/rc.replay
-	exit 0
+	echo "ERROR [init] replay mode is not supported in this lightweight repo"
+	exit 1
 fi
 
 # initialize script variables
@@ -74,7 +74,7 @@ if [ -f $PARAM_FILE ]; then
 	then
 		echo "ERROR [init] param import failed"
 
-		bsondump $PARAM_FILE
+		echo "ERROR [init] could not inspect invalid parameter file"
 
 		# try to make a backup copy
 		cp $PARAM_FILE param_import_fail.bson
@@ -85,7 +85,7 @@ if [ -f $PARAM_FILE ]; then
 			echo "[init] importing from parameter backup"
 
 			# dump current backup file contents for comparison
-			bsondump $PARAM_BACKUP_FILE
+			echo "ERROR [init] could not inspect backup parameter file"
 
 			param import $PARAM_BACKUP_FILE
 
@@ -280,7 +280,7 @@ fi
 
 if ! pwm_out_sim start -m sim
 then
-	tune_control play error
+	echo "ERROR [init] pwm_out_sim start failed"
 fi
 
 #

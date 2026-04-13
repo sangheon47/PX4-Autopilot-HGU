@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# @name CUAV 7-Nano Direct RT
+# @type Quadrotor x
+# @class Copter
+#
+
+set VEHICLE_TYPE direct
+
+# Keep MAVLink/QGC identification sane while using direct sensor/actuator paths.
+param set-default MAV_TYPE 2

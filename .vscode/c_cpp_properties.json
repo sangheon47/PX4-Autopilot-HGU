@@ -1,0 +1,36 @@
+{
+    "configurations": [
+        {
+            "name": "PX4-7nano",
+            "compilerPath": "/usr/bin/arm-none-eabi-g++",
+            "intelliSenseMode": "linux-gcc-arm",
+            "compileCommands": "${workspaceFolder}/build/cuav_7-nano_minimal/compile_commands.json",
+            "includePath": [
+                "${workspaceFolder}",
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/boards/cuav/7-nano/src",
+                "${workspaceFolder}/platforms/nuttx/src/px4/stm/stm32h7/include",
+                "${workspaceFolder}/platforms/nuttx/NuttX/nuttx/include",
+                "${workspaceFolder}/platforms/nuttx/NuttX/nuttx/arch/arm/include",
+                "${workspaceFolder}/platforms/common/include"
+            ],
+            "defines": [
+                "__PX4_NUTTX"
+            ],
+            "cppStandard": "c++17",
+            "cStandard": "c11",
+            "dotConfig": "${workspaceFolder}/build/cuav_7-nano_minimal/NuttX/nuttx/.config",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}",
+                    "${workspaceFolder}/include",
+                    "${workspaceFolder}/platforms/nuttx/NuttX/nuttx/include",
+                    "${workspaceFolder}/platforms/nuttx/NuttX/nuttx/arch/arm/include",
+                    "${workspaceFolder}/platforms/common/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        }
+    ],
+    "version": 4
+}

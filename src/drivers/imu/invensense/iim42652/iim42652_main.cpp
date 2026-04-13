@@ -61,7 +61,7 @@ void IIM42652::print_usage()
 	PRINT_MODULE_USAGE_COMMAND("start");
 	PRINT_MODULE_USAGE_COMMAND("status");
 	PRINT_MODULE_USAGE_COMMAND("stop");
-	PRINT_MODULE_USAGE_COMMAND_DESCR("zero", "Reset RT controller tilt reference to the current pose");
+	PRINT_MODULE_USAGE_COMMAND_DESCR("auto", "Use realtime main.cpp output on PWM motor outputs");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("esc_calib", "Output ESC calibration throttle levels on PWM motor outputs");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("esc_test", "Apply a capped low-throttle PWM test on PWM motor outputs");
 	PRINT_MODULE_USAGE_ARG("high|low|status", "ESC calibration command", true);
@@ -112,13 +112,13 @@ extern "C" int iim42652_main(int argc, char *argv[])
 		return ThisDriver::module_status(iterator);
 	}
 
-	if (!strcmp(verb, "zero")) {
+	if (!strcmp(verb, "auto")) {
 		if (iterator.runningInstancesCount() == 0) {
 			PX4_ERR("driver not running");
 			return -1;
 		}
 
-		cli.custom1 = ThisDriver::CLI_CUSTOM_RT_ZERO;
+		cli.custom1 = ThisDriver::CLI_CUSTOM_RT_AUTO;
 		return ThisDriver::module_custom_method(cli, iterator);
 	}
 

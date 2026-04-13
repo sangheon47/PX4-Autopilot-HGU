@@ -38,14 +38,22 @@ px4_add_module(
 		#-DDEBUG_BUILD
 	INCLUDES
 		../../../../lib
+		${PX4_SOURCE_DIR}
 	SRCS
 		iim42652_main.cpp
 		IIM42652.cpp
+		IIM42652_actuator.cpp
+		IIM42652_bridge.cpp
+		IIM42652_cli.cpp
+		IIM42652_rt_loop.cpp
+		${PX4_SOURCE_DIR}/include/control_telemetry.cpp
 		IIM42652.hpp
 		InvenSense_IIM42652_registers.hpp
-		../../../../lib/rt_control/rt_control.c
+		${PX4_SOURCE_DIR}/include/control_main.h
+		${PX4_SOURCE_DIR}/include/control_telemetry.h
+		${PX4_SOURCE_DIR}/main.cpp
 	DEPENDS
 		px4_work_queue
 		drivers_accelerometer
 		drivers_gyroscope
-	)
+		)

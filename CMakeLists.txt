@@ -352,7 +352,7 @@ endif()
 set(TESTFILTER "" CACHE STRING "Filter string for ctest to selectively only run specific tests (ctest -R)")
 
 include(px4_add_gtest)
-if(BUILD_TESTING)
+if(BUILD_TESTING AND EXISTS "${PX4_SOURCE_DIR}/test/CMakeLists.txt")
 	# Setting FUZZTEST_FUZZING_MODE=on enables ASAN, and is only supported with Clang
 	if (("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang") OR ("${CMAKE_CXX_COMPILER_ID}" MATCHES "AppleClang"))
 		set(FUZZTEST_FUZZING_MODE ON)
@@ -459,24 +459,26 @@ add_subdirectory(platforms/${PX4_PLATFORM})
 #=============================================================================
 # uORB graph generation: add a custom target 'uorb_graph'
 #
-set(uorb_graph_config ${PX4_BOARD})
+if(EXISTS "${PX4_SOURCE_DIR}/Tools/uorb_graph/create.py")
+	set(uorb_graph_config ${PX4_BOARD})
 
-set(graph_module_list "")
-foreach(module ${config_module_list})
-	set(graph_module_list "${graph_module_list}" "--src-path" "src/${module}")
-endforeach()
+	set(graph_module_list "")
+	foreach(module ${config_module_list})
+		set(graph_module_list "${graph_module_list}" "--src-path" "src/${module}")
+	endforeach()
 
-add_custom_command(OUTPUT ${uorb_graph_config}
-	COMMAND ${PYTHON_EXECUTABLE} ${PX4_SOURCE_DIR}/Tools/uorb_graph/create.py
-		${graph_module_list} --src-path src/lib
-		--merge-depends
-		--exclude-path src/examples
-		--exclude-path src/lib/parameters # FIXME: enable & fix
-		--file ${PX4_SOURCE_DIR}/Tools/uorb_graph/graph_${uorb_graph_config}
-	WORKING_DIRECTORY ${PX4_SOURCE_DIR}
-	COMMENT "Generating uORB graph"
-)
-add_custom_target(uorb_graph DEPENDS ${uorb_graph_config})
+	add_custom_command(OUTPUT ${uorb_graph_config}
+		COMMAND ${PYTHON_EXECUTABLE} ${PX4_SOURCE_DIR}/Tools/uorb_graph/create.py
+			${graph_module_list} --src-path src/lib
+			--merge-depends
+			--exclude-path src/examples
+			--exclude-path src/lib/parameters # FIXME: enable & fix
+			--file ${PX4_SOURCE_DIR}/Tools/uorb_graph/graph_${uorb_graph_config}
+		WORKING_DIRECTORY ${PX4_SOURCE_DIR}
+		COMMENT "Generating uORB graph"
+	)
+	add_custom_target(uorb_graph DEPENDS ${uorb_graph_config})
+endif()
 
 
 include(bloaty)

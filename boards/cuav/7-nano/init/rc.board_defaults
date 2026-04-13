@@ -17,4 +17,9 @@ param set-default BAT1_A_PER_V 24
 
 param set-default USB_MAV_MODE 5
 
+if [ "$CUAV7_MINIMAL" = yes ]
+then
+	return
+fi
+
 safety_button start

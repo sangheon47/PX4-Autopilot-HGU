@@ -3,6 +3,17 @@
 # CUAV 7-Nano specific board sensors init
 #------------------------------------------------------------------------------
 
+if [ "$CUAV7_MINIMAL" = yes ]
+then
+	iim42652 -s -R 22 start
+
+	# Keep the PWM rail selection for direct motor output.
+	pwm_voltage_apply
+
+	netman update
+	return
+fi
+
 if param compare -s ADC_ADS1115_EN 1
 then
 	ads1115 start -X
