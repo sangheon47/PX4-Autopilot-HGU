@@ -270,26 +270,20 @@ private:
 	px4::atomic<uint32_t> _latest_publish_seq{0}; // odd: writer in progress, even: stable
 	uint32_t _published_seq{0};
 
-	// External navigation/input cache. Visual odometry is first; RC/GPS/baro can follow here.
-	struct LatestOpti {
-		hrt_abstime timestamp_sample{0};
-		float x{0.f};
-		float y{0.f};
-		float z{0.f};
-		float roll{0.f};
-		float pitch{0.f};
-		float yaw{0.f};
-		uint32_t seq{0};
-		bool valid{false};
-	};
-	static constexpr uint32_t OPTI_TIMEOUT_US{200000}; // stale sample cutoff for telemetry valid flag
-	uORB::Subscription _vehicle_visual_odometry_sub{ORB_ID(vehicle_visual_odometry)};
-	LatestOpti _latest_opti{};
-	px4::atomic<uint32_t> _latest_opti_sample_seq{0}; // odd: writer in progress, even: stable
-	uint32_t _opti_sample_counter{0};
+		// External navigation/input cache. Visual odometry is first; RC/GPS/baro can follow here.
+		struct LatestVisionPose {
+			hrt_abstime timestamp_sample{0};
+			float position_m[3]{};
+			float rpy_rad[3]{};
+			bool valid{false};
+		};
+		static constexpr uint32_t VISION_POSE_TIMEOUT_US{200000}; // stale sample cutoff for telemetry valid flag
+		uORB::Subscription _vehicle_visual_odometry_sub{ORB_ID(vehicle_visual_odometry)};
+		LatestVisionPose _latest_vision_pose{};
+		px4::atomic<uint32_t> _latest_vision_pose_seq{0}; // odd: writer in progress, even: stable
 
-	// Direct PWM output state for the low-level actuator path.
-	bool _pwm_initialized{false};
+	// Direct motor PWM output state for the low-level actuator path.
+	bool _motor_pwm_initialized{false};
 	uint32_t _motor_pwm_mask{(1u << MOTOR_COUNT) - 1};
 	px4::atomic<uint8_t> _motor_output_mode{static_cast<uint8_t>(MotorOutputMode::Auto)};
 	px4::atomic<uint16_t> _esc_test_pwm{PWM_MIN_US};
@@ -306,28 +300,27 @@ private:
 	volatile bool _request_reset{false};
 	volatile bool _fifo_flush_pending{false};
 
-	struct ActuatorWrite {
-		uint16_t pwm[MOTOR_COUNT]{};
+	struct MotorPwmWrite {
+		uint16_t motor_pwm_us[MOTOR_COUNT]{}; // [us]
 	};
 
-	// Direct actuator output. Implemented in IIM42652_actuator.cpp.
-	bool InitActuatorDirect();
-	void DeinitActuatorDirect();
-	void WriteStep(const control_output_t &out_cmd, ActuatorWrite &out);
+	// Direct motor PWM output. Implemented in IIM42652_motor_pwm.cpp.
+	bool InitMotorPwmOutput();
+	void DeinitMotorPwmOutput();
+	void WriteMotorPwmStep(const control_output_t &out_cmd, MotorPwmWrite &out);
 
-	// Slow-side publish bridge. Implemented in IIM42652_bridge.cpp.
+	// Slow-side publish / telemetry path. Implemented in IIM42652_telemetry.cpp.
 	void PublishSampleOutsideIRQ();
 	void PublishTelemetryOutsideIRQ();
-	void TelemetryStep(const hrt_abstime &cycle_begin, uint32_t input, uint32_t control, uint32_t output,
-			  const float motor[MOTOR_COUNT], const ActuatorWrite &actuator,
-			  const opti_sample_t &opti);
+		void TelemetryStep(const hrt_abstime &cycle_begin, const MotorPwmWrite &motor_pwm_write,
+			  const vision_pose_sample_t &vision_pose);
 
-	// External input cache. Implemented in IIM42652_bridge.cpp.
-	void UpdateLatestOptiSampleOutsideIRQ();
-	bool CopyLatestOptiSample(LatestOpti &sample) const;
-	opti_sample_t BuildOptiSample(const hrt_abstime &cycle_begin, const LatestOpti &sample) const;
+		// External input cache. Implemented in IIM42652_telemetry.cpp.
+		void UpdateLatestVisionPoseOutsideIRQ();
+		bool CopyLatestVisionPose(LatestVisionPose &sample) const;
+		vision_pose_sample_t BuildVisionPoseSample(const hrt_abstime &cycle_begin, const LatestVisionPose &sample) const;
 
-	// Fast-loop execution. Implemented in IIM42652_rt_loop.cpp.
+	// Fast-loop execution. Implemented in IIM42652_fast_loop.cpp.
 	static void ControlLoopTrampoline(void *arg);
 	void ControlLoopIRQ();
 	void StartControlLoopIRQ();

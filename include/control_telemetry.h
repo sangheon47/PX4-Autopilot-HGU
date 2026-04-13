@@ -46,48 +46,26 @@ extern "C" {
 #define TELEM_PUBLISH_BURST 8U
 
 typedef struct {
-	float x;
-	float y;
-	float z;
-	float roll;
-	float pitch;
-	float yaw;
-	uint32_t seq;
-	uint32_t age; // [us]
+	float position_m[3]; // [m]
+	float rpy_rad[3]; // [rad]
+	uint32_t age_us; // [us]
 	bool valid;
-} opti_sample_t;
+} vision_pose_sample_t;
 
 typedef struct {
-	uint32_t cycle;
-	double ideal_start; // [s]
-	double actual_start; // [s]
-	uint32_t exec; // [us]
-	uint32_t input; // [us]
-	uint32_t control; // [us]
-	uint32_t output; // [us]
-	uint32_t slack; // [us]
-	uint32_t missed_cycles;
-	float accel[3]; // [m/s^2]
-	float gyro[3]; // [rad/s]
-	float motor[MOTOR_NUM]; // [0.0 ~ 1.0]
-	uint16_t pwm[MOTOR_NUM]; // [us]
-	float opti_x;
-	float opti_y;
-	float opti_z;
-	float opti_roll;
-	float opti_pitch;
-	float opti_yaw;
-	uint32_t opti_seq;
-	uint32_t opti_age; // [us]
-	uint8_t opti_valid;
+	uint32_t loop_dt_us; // [us]
+	uint32_t exec_us; // [us]
+	float accel_m_s2[3]; // [m/s^2]
+	float gyro_rad_s[3]; // [rad/s]
+	uint16_t motor_pwm_us[MOTOR_NUM]; // [us]
+	float vision_pos_m[3]; // [m]
+	float vision_rpy_rad[3]; // [rad]
+	uint32_t vision_age_us; // [us]
+	uint8_t vision_valid;
 } telem_frame_t;
 
 typedef struct {
-	uint32_t cycle;
-	uint64_t t0; // [us]
-	uint64_t last_control_ts; // [us]
-	uint32_t deadline_miss_count;
-	uint32_t max_loop_dt; // [us]
+	uint64_t last_cycle_start_us; // [us]
 } loop_state_t;
 
 typedef struct {

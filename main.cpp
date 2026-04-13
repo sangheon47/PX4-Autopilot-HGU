@@ -36,7 +36,7 @@
  *
  * Open this file first.
  * This is the visible 7-nano realtime loop:
- * IMU sample in -> motor command -> 4 ESC PWM targets out.
+ * IMU sample in -> motor PWM command -> 4 ESC PWM targets out.
  *
  * Change the realtime settings here, then build and upload.
  */
@@ -47,9 +47,10 @@
 #include <math.h>
 #include <string.h>
 
-#define SAMPLE_FREQ 200U    // [Hz]
-#define SAMPLE_PERIOD 5000U // [us]
-#define SAMPLE_DT 0.005f    // [s]
+#define SAMPLE_FREQ 200U // [Hz]
+// SAMPLE_PERIOD is an integer [us] scheduler period, so choose SAMPLE_FREQ accordingly for exact timing.
+#define SAMPLE_PERIOD (1000000U / SAMPLE_FREQ) // [us]
+#define SAMPLE_DT ((float)(SAMPLE_PERIOD) * 1e-6f) // [s]
 
 extern "C" const control_timing_t CONTROL_TIMING = {
 	SAMPLE_FREQ,
@@ -57,11 +58,7 @@ extern "C" const control_timing_t CONTROL_TIMING = {
 	SAMPLE_DT
 };
 
-static int16_t read_raw(uint8_t hi, uint8_t lo)
-{
-	// The IMU stores each sample as [high byte][low byte].
-	return (int16_t)((hi << 8u) | lo);
-}
+static int16_t read_raw(uint8_t hi, uint8_t lo);
 
 extern "C" void control_step(const control_input_t *in, control_output_t *out)
 {
@@ -94,35 +91,44 @@ extern "C" void control_step(const control_input_t *in, control_output_t *out)
 		out->gyro[i] = out->gyro_raw[i] * GYRO_SCALE; // [count] -> [rad/s]
 	}
 
-	// 3. Direct PWM command for each motor.
-	const uint16_t motor_1_pwm = in->pwm_min; // front-right [us]
-	const uint16_t motor_2_pwm = in->pwm_min; // front-left  [us]
-	const uint16_t motor_3_pwm = in->pwm_min; // rear-left   [us]
-	const uint16_t motor_4_pwm = in->pwm_min; // rear-right  [us]
+	// 3. Direct motor PWM command for each ESC output.
+	const float motor1_pwm_pct = 0.0f; // [%] front-right
+	const float motor2_pwm_pct = 0.0f; // [%] front-left
+	const float motor3_pwm_pct = 0.0f; // [%] rear-left
+	const float motor4_pwm_pct = 0.0f; // [%] rear-right
 
-	const uint16_t pwm_cmd[MOTOR_NUM] = {
-		motor_1_pwm,
-		motor_2_pwm,
-		motor_3_pwm,
-		motor_4_pwm
+	const float motor_pwm_cmd_pct[MOTOR_NUM] = {
+		motor1_pwm_pct,
+		motor2_pwm_pct,
+		motor3_pwm_pct,
+		motor4_pwm_pct
 	};
 
-	// 4. Clamp PWM and keep a normalized copy for telemetry/status.
-	const float pwm_span = (float)(in->pwm_max - in->pwm_min); // [us]
+	// 4. Clamp motor PWM percent and convert it into the ESC pulse width.
+	const float motor_pwm_span_us = (float)(in->motor_pwm_max_us - in->motor_pwm_min_us); // [us]
 
 	for (uint8_t i = 0; i < MOTOR_NUM; ++i) {
-		uint16_t pwm = pwm_cmd[i];
+		float motor_pwm_pct = motor_pwm_cmd_pct[i];
 
-		if (pwm < in->pwm_min) {
-			pwm = in->pwm_min;
+		if (motor_pwm_pct < 0.0f) {
+			motor_pwm_pct = 0.0f;
 		}
 
-		if (pwm > in->pwm_max) {
-			pwm = in->pwm_max;
+		if (motor_pwm_pct > 100.0f) {
+			motor_pwm_pct = 100.0f;
 		}
 
-		out->pwm[i] = pwm; // [us]
-		out->motor[i] = (pwm_span > 0.0f) ? ((float)(pwm - in->pwm_min) / pwm_span) : 0.0f; // [us] -> [0.0 ~ 1.0]
+		const uint16_t motor_pwm_us = (uint16_t)roundf((float)in->motor_pwm_min_us
+					 + (motor_pwm_span_us * motor_pwm_pct * 0.01f)); // [%] -> [us]
+
+		out->motor_pwm_pct[i] = motor_pwm_pct; // [%]
+		out->motor_pwm_us[i] = motor_pwm_us; // [us]
 	}
 
+}
+
+static int16_t read_raw(uint8_t hi, uint8_t lo)
+{
+	// The IMU stores each sample as [high byte][low byte].
+	return (int16_t)((hi << 8u) | lo);
 }

@@ -58,30 +58,20 @@ private:
 	static constexpr uint16_t RT_CONTROL_TUNNEL_PAYLOAD_TYPE{32768};
 
 	struct RtControlTunnelPayload {
-		double actual_start_s{0.0};
-		uint32_t cycle{0};
+		uint64_t timestamp_us{0};
+		uint32_t loop_dt_us{0};
 		uint32_t exec_us{0};
-		uint32_t input_us{0};
-		uint32_t control_us{0};
-		uint32_t output_us{0};
-		uint32_t missed_cycles{0};
 		float accel_m_s2[3]{};
 		float gyro_rad_s[3]{};
-		float motor_norm[4]{};
-		uint16_t pwm_us[4]{};
-		float opti_x{0.f};
-		float opti_y{0.f};
-		float opti_z{0.f};
-		float opti_roll{0.f};
-		float opti_pitch{0.f};
-		float opti_yaw{0.f};
-		uint32_t opti_seq{0};
-		uint32_t opti_age_us{0};
-		uint8_t opti_valid{0};
-		uint8_t padding[7]{};
+		uint16_t motor_pwm_us[4]{}; // [us]
+		float vision_pos_m[3]{}; // [m]
+		float vision_rpy_rad[3]{}; // [rad]
+		uint32_t vision_age_us{0}; // [us]
+		uint8_t vision_valid{0};
+		uint8_t padding[3]{};
 	};
 
-	static_assert(sizeof(RtControlTunnelPayload) == 120, "Unexpected RT control tunnel payload size");
+	static_assert(sizeof(RtControlTunnelPayload) == 80, "Unexpected RT control tunnel payload size");
 	static_assert(sizeof(RtControlTunnelPayload) <= 128, "RT control tunnel payload exceeds MAVLink TUNNEL limit");
 
 	explicit MavlinkStreamRtControlTelemetry(Mavlink *mavlink) : MavlinkStream(mavlink) {}
@@ -97,26 +87,16 @@ private:
 		}
 
 		RtControlTunnelPayload payload{};
-		payload.actual_start_s = telemetry.actual_start_s;
-		payload.cycle = telemetry.cycle;
+		payload.timestamp_us = telemetry.timestamp;
+		payload.loop_dt_us = telemetry.loop_dt_us;
 		payload.exec_us = telemetry.exec_us;
-		payload.input_us = telemetry.input_us;
-		payload.control_us = telemetry.control_us;
-		payload.output_us = telemetry.output_us;
-		payload.missed_cycles = telemetry.missed_cycles;
 		memcpy(payload.accel_m_s2, telemetry.accel_m_s2, sizeof(payload.accel_m_s2));
 		memcpy(payload.gyro_rad_s, telemetry.gyro_rad_s, sizeof(payload.gyro_rad_s));
-		memcpy(payload.motor_norm, telemetry.motor_norm, sizeof(payload.motor_norm));
-		memcpy(payload.pwm_us, telemetry.pwm_us, sizeof(payload.pwm_us));
-		payload.opti_x = telemetry.opti_x;
-		payload.opti_y = telemetry.opti_y;
-		payload.opti_z = telemetry.opti_z;
-		payload.opti_roll = telemetry.opti_roll;
-		payload.opti_pitch = telemetry.opti_pitch;
-		payload.opti_yaw = telemetry.opti_yaw;
-		payload.opti_seq = telemetry.opti_seq;
-		payload.opti_age_us = telemetry.opti_age_us;
-		payload.opti_valid = telemetry.opti_valid;
+		memcpy(payload.motor_pwm_us, telemetry.motor_pwm_us, sizeof(payload.motor_pwm_us));
+		memcpy(payload.vision_pos_m, telemetry.vision_pos_m, sizeof(payload.vision_pos_m));
+		memcpy(payload.vision_rpy_rad, telemetry.vision_rpy_rad, sizeof(payload.vision_rpy_rad));
+		payload.vision_age_us = telemetry.vision_age_us;
+		payload.vision_valid = telemetry.vision_valid;
 
 		mavlink_tunnel_t msg{};
 		msg.target_system = 0;

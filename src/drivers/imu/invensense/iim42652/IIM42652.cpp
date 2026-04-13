@@ -89,8 +89,8 @@ int IIM42652::init()
 		return ret;
 	}
 
-	if (!InitActuatorDirect()) {
-		PX4_ERR("actuator direct init failed");
+	if (!InitMotorPwmOutput()) {
+		PX4_ERR("motor pwm output init failed");
 		return PX4_ERROR;
 	}
 
@@ -115,7 +115,7 @@ void IIM42652::exit_and_cleanup()
 {
 	StopControlLoopIRQ();
 	_telem_pub.unadvertise();
-	DeinitActuatorDirect();
+	DeinitMotorPwmOutput();
 	DataReadyInterruptDisable();
 	I2CSPIDriverBase::exit_and_cleanup();
 }
@@ -216,7 +216,7 @@ void IIM42652::RunImpl()
 
 	case STATE::RT_LOOP_RUN: {
 			if (_control_loop_running) {
-				UpdateLatestOptiSampleOutsideIRQ();
+				UpdateLatestVisionPoseOutsideIRQ();
 				PublishSampleOutsideIRQ();
 				PublishTelemetryOutsideIRQ();
 

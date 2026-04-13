@@ -1,23 +1,12 @@
 uint8 ORB_QUEUE_LENGTH = 4
 
-uint64 timestamp            # time since system start (microseconds)
-uint32 cycle
-float64 actual_start_s
-uint32 exec_us
-uint32 input_us
-uint32 control_us
-uint32 output_us
-uint32 missed_cycles
-float32[3] accel_m_s2
-float32[3] gyro_rad_s
-float32[4] motor_norm
-uint16[4] pwm_us
-float32 opti_x
-float32 opti_y
-float32 opti_z
-float32 opti_roll
-float32 opti_pitch
-float32 opti_yaw
-uint32 opti_seq
-uint32 opti_age_us
-uint8 opti_valid
+uint64 timestamp                # [us] control-cycle start time since boot
+uint32 loop_dt_us               # [us] actual interval since the previous control cycle
+uint32 exec_us                  # [us] total realtime-loop execution time
+float32[3] accel_m_s2           # [m/s^2] latest control-loop acceleration
+float32[3] gyro_rad_s           # [rad/s] latest control-loop angular rate
+uint16[4] motor_pwm_us          # [us] final PWM sent to the 4 motor ESC outputs
+float32[3] vision_pos_m         # [m] latest visual odometry position, NaN if invalid
+float32[3] vision_rpy_rad       # [rad] latest visual odometry roll/pitch/yaw, NaN if invalid
+uint32 vision_age_us            # [us] age of the latest visual odometry sample
+uint8 vision_valid              # 1 when the visual odometry sample is finite and fresh

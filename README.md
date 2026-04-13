@@ -6,6 +6,7 @@
 이 파일이 7-nano 실시간 제어 메인 사이클이고, raw IMU register decode부터 PWM 계산까지 직접 담고 있습니다.
 `IIM42652.cpp`는 IMU IRQ에서 SPI 전송과 telemetry/PWM 출력을 처리하는 하드웨어 래퍼입니다.
 루프 주기, 샘플타임, 런타임, 정적 로그 배열 크기는 루트 `main.cpp` 상단 `#define` 블록에서 같이 바꿉니다.
+실시간 제어 문맥은 [7NANO_CONTEXT.md](./7NANO_CONTEXT.md), 텔레메트리 포맷과 예시는 [TELEMETRY.md](./TELEMETRY.md)에 정리되어 있습니다.
 
 지원 대상:
 
@@ -30,7 +31,7 @@
 ## Build
 
 ```bash
-make cuav_7-nano_minimal
+env CCACHE_DISABLE=1 make cuav_7-nano_minimal
 make px4_sitl_default
 ```
 
@@ -52,24 +53,30 @@ make cuav_7-nano_minimal upload
 - `main.cpp`
 - `include/control_main.h`
 - `include/control_telemetry.h`
-- `include/control_telemetry.cpp`
 - `boards/cuav/7-nano`
 - `boards/px4/sitl`
+- `src/drivers/imu/invensense/iim42652/IIM42652.hpp`
 - `src/drivers/imu/invensense/iim42652/IIM42652.cpp`
-- `src/drivers/imu/invensense/iim42652/IIM42652_rt_loop.cpp`
-- `src/drivers/imu/invensense/iim42652/IIM42652_bridge.cpp`
+- `src/drivers/imu/invensense/iim42652/IIM42652_driver_main.cpp`
+- `src/drivers/imu/invensense/iim42652/IIM42652_fast_loop.cpp`
+- `src/drivers/imu/invensense/iim42652/IIM42652_motor_pwm.cpp`
+- `src/drivers/imu/invensense/iim42652/IIM42652_telemetry.cpp`
+- `src/drivers/imu/invensense/iim42652/IIM42652_cli.cpp`
 - `ROMFS/px4fmu_common/init.d/rcS`
 - `boards/cuav/7-nano/init/rc.minimal`
 - `boards/cuav/7-nano/minimal.px4board`
 - `Tools/simulation/gz/models/bullet_interceptor`
+- `TELEMETRY.md`
 
 가장 먼저 볼 파일:
 
 - `main.cpp`: raw IMU register decode -> SI 단위 변환 -> 모터 명령 -> 4개 ESC PWM 목표 생성, loop Hz/period/sample time 설정
 - `include/control_main.h`: main.cpp와 드라이버가 공유하는 최소 입출력 타입
-- `include/control_telemetry.h`, `include/control_telemetry.cpp`: telemetry queue와 shared telemetry 타입
-- `src/drivers/imu/invensense/iim42652/IIM42652_rt_loop.cpp`: IMU 읽기 -> main.cpp 호출
-- `src/drivers/imu/invensense/iim42652/IIM42652_bridge.cpp`: queue -> uORB telemetry publish bridge
+- `include/control_telemetry.h`: telemetry queue와 shared telemetry 타입
+- `src/drivers/imu/invensense/iim42652/IIM42652_fast_loop.cpp`: IMU 읽기 -> main.cpp 호출
+- `src/drivers/imu/invensense/iim42652/IIM42652_motor_pwm.cpp`: 4개 모터 PWM 출력
+- `src/drivers/imu/invensense/iim42652/IIM42652_telemetry.cpp`: queue -> uORB telemetry publish bridge
+- `TELEMETRY.md`: 현재 telemetry field와 CLI/CSV 예시
 - `ROMFS/px4fmu_common/init.d-posix/airframes/22000_gz_bullet_interceptor`: Bullet Interceptor SITL 시작점
 
 ## Remaining Runtime Pieces

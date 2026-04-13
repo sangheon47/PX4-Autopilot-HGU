@@ -39,14 +39,14 @@ px4_add_module(
 	INCLUDES
 		../../../../lib
 		${PX4_SOURCE_DIR}
-	SRCS
-		iim42652_main.cpp
-		IIM42652.cpp
-		IIM42652_actuator.cpp
-		IIM42652_bridge.cpp
-		IIM42652_cli.cpp
-		IIM42652_rt_loop.cpp
-		${PX4_SOURCE_DIR}/include/control_telemetry.cpp
+		SRCS
+			IIM42652_driver_main.cpp
+			IIM42652.cpp
+			IIM42652_motor_pwm.cpp
+			IIM42652_telemetry.cpp
+			IIM42652_cli.cpp
+			IIM42652_fast_loop.cpp
+			${PX4_SOURCE_DIR}/include/control_telemetry.cpp
 		IIM42652.hpp
 		InvenSense_IIM42652_registers.hpp
 		${PX4_SOURCE_DIR}/include/control_main.h

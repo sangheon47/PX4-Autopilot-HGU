@@ -64,12 +64,10 @@ const char *motor_output_mode_str(uint8_t mode_raw)
 
 void IIM42652::print_status()
 {
-	const uint32_t control_period = CONTROL_TIMING.period;
 	telem_queue_status_t queue{};
 	telem_status(&queue);
 
-	PX4_INFO("RT period_us=%u sample_time_s=%.6f freq_hz=%.1f telem_queue=%lu/%lu dropped=%lu high_water=%lu",
-		 (unsigned)control_period,
+	PX4_INFO("RT sample_time_s=%.6f freq_hz=%.1f telem_queue=%lu/%lu dropped=%lu high_water=%lu",
 		 (double)CONTROL_TIMING.dt,
 		 (double)CONTROL_TIMING.freq,
 		 (unsigned long)queue.queued,
@@ -77,71 +75,53 @@ void IIM42652::print_status()
 		 (unsigned long)queue.dropped,
 		 (unsigned long)queue.high_watermark);
 
-	PX4_INFO("RT pwm initialized=%s rate_hz=%u mask=0x%lx output_mode=%s test_pwm_us=%u",
-		 _pwm_initialized ? "true" : "false",
+	PX4_INFO("RT motor_pwm initialized=%s rate_hz=%u mask=0x%lx output_mode=%s test_pwm_us=%u",
+		 _motor_pwm_initialized ? "true" : "false",
 		 MOTOR_PWM_RATE,
 		 (unsigned long)_motor_pwm_mask,
 		 motor_output_mode_str(_motor_output_mode.load()),
 		 (unsigned)_esc_test_pwm.load());
 
-	if (_last_frame.cycle == 0) {
+	if ((_last_frame.loop_dt_us == 0U) && (_last_frame.exec_us == 0U)) {
 		PX4_INFO("RT no cycle yet");
 		return;
 	}
 
-	const double start_jitter_s = _last_frame.actual_start - _last_frame.ideal_start;
-	const unsigned long overrun_us = (_last_frame.exec > control_period)
-					 ? (unsigned long)(_last_frame.exec - control_period)
-					 : 0UL;
-
-	PX4_INFO("RT cycle=%lu ideal_start_s=%.6f actual_start_s=%.6f start_jitter_s=%+.6f",
-		(unsigned long)_last_frame.cycle,
-		_last_frame.ideal_start,
-		_last_frame.actual_start,
-		start_jitter_s);
-
-	PX4_INFO("RT time input_us=%lu control_us=%lu output_us=%lu exec_us=%lu slack_us=%lu overrun_us=%lu",
-		 (unsigned long)_last_frame.input,
-		 (unsigned long)_last_frame.control,
-		 (unsigned long)_last_frame.output,
-		 (unsigned long)_last_frame.exec,
-		 (unsigned long)_last_frame.slack,
-		 overrun_us);
+	PX4_INFO("RT time loop_dt_us=%lu exec_us=%lu",
+		 (unsigned long)_last_frame.loop_dt_us,
+		 (unsigned long)_last_frame.exec_us);
 
 	PX4_INFO("RT accel_m_s2: x=%.5f y=%.5f z=%.5f gyro_rad_s: roll=%.5f pitch=%.5f yaw=%.5f",
-		 (double)_last_frame.accel[0], (double)_last_frame.accel[1], (double)_last_frame.accel[2],
-		 (double)_last_frame.gyro[0], (double)_last_frame.gyro[1], (double)_last_frame.gyro[2]);
+		 (double)_last_frame.accel_m_s2[0], (double)_last_frame.accel_m_s2[1], (double)_last_frame.accel_m_s2[2],
+		 (double)_last_frame.gyro_rad_s[0], (double)_last_frame.gyro_rad_s[1], (double)_last_frame.gyro_rad_s[2]);
 
-	PX4_INFO("RT pwm_us=%u(%.2f%%) %u(%.2f%%) %u(%.2f%%) %u(%.2f%%)",
-		 (unsigned)_last_frame.pwm[0], (double)(_last_frame.motor[0] * 100.f),
-		 (unsigned)_last_frame.pwm[1], (double)(_last_frame.motor[1] * 100.f),
-		 (unsigned)_last_frame.pwm[2], (double)(_last_frame.motor[2] * 100.f),
-		 (unsigned)_last_frame.pwm[3], (double)(_last_frame.motor[3] * 100.f));
+	PX4_INFO("RT motor_pwm_us=%u %u %u %u",
+		 (unsigned)_last_frame.motor_pwm_us[0],
+		 (unsigned)_last_frame.motor_pwm_us[1],
+		 (unsigned)_last_frame.motor_pwm_us[2],
+		 (unsigned)_last_frame.motor_pwm_us[3]);
 
-	if (_last_frame.opti_valid) {
-		PX4_INFO("RT opti seq=%lu age_us=%lu pos=(%.4f, %.4f, %.4f) rpy=(%.4f, %.4f, %.4f)",
-			 (unsigned long)_last_frame.opti_seq,
-			 (unsigned long)_last_frame.opti_age,
-			 (double)_last_frame.opti_x,
-			 (double)_last_frame.opti_y,
-			 (double)_last_frame.opti_z,
-			 (double)_last_frame.opti_roll,
-			 (double)_last_frame.opti_pitch,
-			 (double)_last_frame.opti_yaw);
+	if (_last_frame.vision_valid) {
+		PX4_INFO("RT vision age_us=%lu pos_m=(%.4f, %.4f, %.4f) rpy_rad=(%.4f, %.4f, %.4f)",
+			 (unsigned long)_last_frame.vision_age_us,
+			 (double)_last_frame.vision_pos_m[0],
+			 (double)_last_frame.vision_pos_m[1],
+			 (double)_last_frame.vision_pos_m[2],
+			 (double)_last_frame.vision_rpy_rad[0],
+			 (double)_last_frame.vision_rpy_rad[1],
+			 (double)_last_frame.vision_rpy_rad[2]);
 
 	} else {
-		PX4_INFO("RT opti invalid seq=%lu age_us=%lu",
-			 (unsigned long)_last_frame.opti_seq,
-			 (unsigned long)_last_frame.opti_age);
+		PX4_INFO("RT vision invalid age_us=%lu",
+			 (unsigned long)_last_frame.vision_age_us);
 	}
 
-	PX4_INFO("RT perf bad_xfer=%lu fifo_empty=%lu fifo_overflow=%lu bad_reg=%lu failure_count=%u missed_cycles=%lu",
+	PX4_INFO("RT perf bad_xfer=%lu fifo_empty=%lu fifo_overflow=%lu bad_reg=%lu failure_count=%u",
 		 (unsigned long)perf_event_count(_bad_transfer_perf),
 		 (unsigned long)perf_event_count(_fifo_empty_perf),
 		 (unsigned long)perf_event_count(_fifo_overflow_perf),
 		 (unsigned long)perf_event_count(_bad_register_perf),
-		 (unsigned)_failure_count,
-		 (unsigned long)_last_frame.missed_cycles);
+		 (unsigned)_failure_count);
 
 	PX4_INFO("RT telem topic=rt_control_telemetry advertised=%s pub_ok=%lu pub_fail=%lu",
 		 _telem_pub.advertised() ? "true" : "false",
@@ -165,7 +145,7 @@ void IIM42652::custom_method(const BusCLIArguments &cli)
 	case CLI_CUSTOM_ESC_CAL_LOW:
 		_motor_output_mode.store(static_cast<uint8_t>(MotorOutputMode::EscCalLow));
 
-		if (_pwm_initialized) {
+		if (_motor_pwm_initialized) {
 			for (int i = 0; i < MOTOR_COUNT; ++i) {
 				up_pwm_servo_set(i, PWM_MIN_US);
 			}
@@ -182,7 +162,7 @@ void IIM42652::custom_method(const BusCLIArguments &cli)
 			_esc_test_pwm.store(pwm);
 			_motor_output_mode.store(static_cast<uint8_t>(MotorOutputMode::EscTest));
 
-			if (_pwm_initialized) {
+			if (_motor_pwm_initialized) {
 				for (int i = 0; i < MOTOR_COUNT; ++i) {
 					up_pwm_servo_set(i, pwm);
 				}
@@ -201,6 +181,6 @@ void IIM42652::custom_method(const BusCLIArguments &cli)
 
 	PX4_INFO("ESC output status: output_mode=%s pwm_initialized=%s test_pwm_us=%u",
 		 motor_output_mode_str(_motor_output_mode.load()),
-		 _pwm_initialized ? "true" : "false",
+		 _motor_pwm_initialized ? "true" : "false",
 		 (unsigned)_esc_test_pwm.load());
 }

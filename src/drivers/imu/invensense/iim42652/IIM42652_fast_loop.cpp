@@ -75,9 +75,7 @@ void IIM42652::StartControlLoopIRQ()
 	hrt_call_init(&_control_loop_call);
 	_loop_state = {};
 	telem_reset();
-	_loop_state.t0 = static_cast<uint64_t>(hrt_absolute_time()) + CONTROL_TIMING.period;
-	_loop_state.last_control_ts = 0U;
-	_loop_state.deadline_miss_count = 0U;
+	_loop_state.last_cycle_start_us = 0U;
 	_request_reset = false;
 	_fifo_flush_pending = false;
 	_latest_publish_seq.store(0);
@@ -106,7 +104,6 @@ void IIM42652::ControlLoopIRQ()
 	const hrt_abstime cycle_begin = hrt_absolute_time();
 	const hrt_abstime timestamp_sample = cycle_begin;
 	const bool sample_ok = ReadSampleDirect(timestamp_sample);
-	const uint32_t input_time = static_cast<uint32_t>(hrt_absolute_time() - cycle_begin);
 
 	if (sample_ok) {
 		if (_failure_count > 0) {
@@ -121,20 +118,17 @@ void IIM42652::ControlLoopIRQ()
 		}
 	}
 
-	float motor[MOTOR_COUNT] {};
-	LatestOpti opti_raw{};
-	(void)CopyLatestOptiSample(opti_raw);
-	const opti_sample_t opti = BuildOptiSample(cycle_begin, opti_raw);
+	LatestVisionPose vision_pose_raw{};
+	(void)CopyLatestVisionPose(vision_pose_raw);
+	const vision_pose_sample_t vision_pose = BuildVisionPoseSample(cycle_begin, vision_pose_raw);
 
 	control_input_t in{};
 	in.imu = _latest_imu;
-	in.pwm_min = PWM_MIN_US;
-	in.pwm_max = PWM_MAX_US;
+	in.motor_pwm_min_us = PWM_MIN_US;
+	in.motor_pwm_max_us = PWM_MAX_US;
 
 	control_output_t out{};
-	const hrt_abstime control_begin = hrt_absolute_time();
 	control_step(&in, &out);
-	const uint32_t control_time = static_cast<uint32_t>(hrt_absolute_time() - control_begin);
 
 	for (int i = 0; i < 3; ++i) {
 		_latest_accel[i] = out.accel[i];
@@ -155,16 +149,10 @@ void IIM42652::ControlLoopIRQ()
 		_latest_publish_seq.store(seq + 2);
 	}
 
-	for (int i = 0; i < MOTOR_COUNT; ++i) {
-		motor[i] = out.motor[i];
-	}
+	MotorPwmWrite motor_pwm_write{};
+	WriteMotorPwmStep(out, motor_pwm_write);
 
-	ActuatorWrite actuator{};
-	const hrt_abstime output_begin = hrt_absolute_time();
-	WriteStep(out, actuator);
-	const uint32_t output_time = static_cast<uint32_t>(hrt_absolute_time() - output_begin);
-
-	TelemetryStep(cycle_begin, input_time, control_time, output_time, motor, actuator, opti);
+	TelemetryStep(cycle_begin, motor_pwm_write, vision_pose);
 }
 
 bool IIM42652::ReadSampleDirect(const hrt_abstime &timestamp_sample)

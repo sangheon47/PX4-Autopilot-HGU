@@ -66,8 +66,8 @@ typedef struct {
 
 typedef struct {
 	imu_regs_t imu;
-	uint16_t pwm_min; // [us]
-	uint16_t pwm_max; // [us]
+	uint16_t motor_pwm_min_us; // [us]
+	uint16_t motor_pwm_max_us; // [us]
 } control_input_t;
 
 typedef struct {
@@ -76,8 +76,8 @@ typedef struct {
 	float accel[3]; // [m/s^2]
 	float gyro[3]; // [rad/s]
 	float temperature; // [degC]
-	float motor[MOTOR_NUM]; // [0.0 ~ 1.0]
-	uint16_t pwm[MOTOR_NUM]; // [us]
+	float motor_pwm_pct[MOTOR_NUM]; // [%]
+	uint16_t motor_pwm_us[MOTOR_NUM]; // [us]
 } control_output_t;
 
 typedef struct {

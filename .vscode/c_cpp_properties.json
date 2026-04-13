@@ -1,35 +1,23 @@
 {
     "configurations": [
         {
-            "name": "PX4-7nano",
-            "compilerPath": "/usr/bin/arm-none-eabi-g++",
-            "intelliSenseMode": "linux-gcc-arm",
-            "compileCommands": "${workspaceFolder}/build/cuav_7-nano_minimal/compile_commands.json",
+            "name": "PX4",
             "includePath": [
-                "${workspaceFolder}",
-                "${workspaceFolder}/include",
-                "${workspaceFolder}/boards/cuav/7-nano/src",
-                "${workspaceFolder}/platforms/nuttx/src/px4/stm/stm32h7/include",
-                "${workspaceFolder}/platforms/nuttx/NuttX/nuttx/include",
-                "${workspaceFolder}/platforms/nuttx/NuttX/nuttx/arch/arm/include",
-                "${workspaceFolder}/platforms/common/include"
+                "${workspaceFolder}/**",
+                "/home/psh/PX4-Autopilot-7-nano/boards/cuav/7-nano/src",
+                "/home/psh/PX4-Autopilot-7-nano/platforms/nuttx/src/px4/stm/stm32h7/include",
+                "/home/psh/PX4-Autopilot-7-nano/platforms/nuttx/NuttX/nuttx/include/"
             ],
-            "defines": [
-                "__PX4_NUTTX"
-            ],
-            "cppStandard": "c++17",
+            "defines": [],
+            "macFrameworkPath": [],
+            "configurationProvider": "ms-vscode.cmake-tools",
+            "cppStandard": "c++14",
             "cStandard": "c11",
-            "dotConfig": "${workspaceFolder}/build/cuav_7-nano_minimal/NuttX/nuttx/.config",
-            "browse": {
-                "path": [
-                    "${workspaceFolder}",
-                    "${workspaceFolder}/include",
-                    "${workspaceFolder}/platforms/nuttx/NuttX/nuttx/include",
-                    "${workspaceFolder}/platforms/nuttx/NuttX/nuttx/arch/arm/include",
-                    "${workspaceFolder}/platforms/common/include"
-                ],
-                "limitSymbolsToIncludedHeaders": true
-            }
+            "dotConfig": "/home/psh/PX4-Autopilot-7-nano/build/cuav_7-nano_minimal/NuttX/nuttx/.config",
+            "forcedInclude": [
+                 "/home/psh/PX4-Autopilot-7-nano/build/cuav_7-nano_minimal/px4_boardconfig.h",
+                 "/home/psh/PX4-Autopilot-7-nano/platforms/common/include/px4_platform_common/defines.h"
+                 ]
         }
     ],
     "version": 4

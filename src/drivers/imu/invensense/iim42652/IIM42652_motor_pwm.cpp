@@ -37,33 +37,33 @@
 #include <matrix/matrix/math.hpp>
 #include <px4_arch/io_timer.h>
 
-void IIM42652::WriteStep(const control_output_t &out_cmd, ActuatorWrite &out)
+void IIM42652::WriteMotorPwmStep(const control_output_t &out_cmd, MotorPwmWrite &out)
 {
 	const MotorOutputMode output_mode = static_cast<MotorOutputMode>(_motor_output_mode.load());
-	uint16_t pwm = PWM_MIN_US;
+	uint16_t motor_pwm_us = PWM_MIN_US; // [us]
 
 	if (output_mode == MotorOutputMode::EscCalHigh) {
-		pwm = PWM_MAX_US;
+		motor_pwm_us = PWM_MAX_US;
 
 	} else if (output_mode == MotorOutputMode::EscTest) {
-		pwm = _esc_test_pwm.load();
+		motor_pwm_us = _esc_test_pwm.load();
 	}
 
 	for (int i = 0; i < MOTOR_COUNT; i++) {
 		if (output_mode == MotorOutputMode::Auto) {
-			pwm = math::constrain(out_cmd.pwm[i], PWM_MIN_US, PWM_MAX_US);
+			motor_pwm_us = math::constrain(out_cmd.motor_pwm_us[i], PWM_MIN_US, PWM_MAX_US);
 		}
 
-		out.pwm[i] = pwm;
-		up_pwm_servo_set(i, pwm);
+		out.motor_pwm_us[i] = motor_pwm_us;
+		up_pwm_servo_set(i, motor_pwm_us);
 	}
 
 	up_pwm_update(_motor_pwm_mask);
 }
 
-bool IIM42652::InitActuatorDirect()
+bool IIM42652::InitMotorPwmOutput()
 {
-	if (_pwm_initialized) {
+	if (_motor_pwm_initialized) {
 		return true;
 	}
 
@@ -78,7 +78,7 @@ bool IIM42652::InitActuatorDirect()
 
 		if (up_pwm_servo_set_rate_group_update(timer, MOTOR_PWM_RATE) < 0) {
 			up_pwm_servo_deinit(_motor_pwm_mask);
-			PX4_ERR("pwm rate init failed (timer=%d rate=%u)", timer, MOTOR_PWM_RATE);
+			PX4_ERR("motor pwm rate init failed (timer=%d rate=%u)", timer, MOTOR_PWM_RATE);
 			return false;
 		}
 	}
@@ -94,15 +94,15 @@ bool IIM42652::InitActuatorDirect()
 	}
 
 	up_pwm_update(_motor_pwm_mask);
-	_pwm_initialized = true;
+	_motor_pwm_initialized = true;
 	return true;
 }
 
-void IIM42652::DeinitActuatorDirect()
+void IIM42652::DeinitMotorPwmOutput()
 {
-	if (_pwm_initialized) {
+	if (_motor_pwm_initialized) {
 		up_pwm_servo_arm(false, _motor_pwm_mask);
 		up_pwm_servo_deinit(_motor_pwm_mask);
-		_pwm_initialized = false;
+		_motor_pwm_initialized = false;
 	}
 }

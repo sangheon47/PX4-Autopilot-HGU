@@ -29,39 +29,30 @@ except ImportError as exc:
 
 
 RT_CONTROL_TUNNEL_PAYLOAD_TYPE = 32768
-PAYLOAD = struct.Struct("<dIIIIII3f3f4f4H6fIIB7x")
+PAYLOAD = struct.Struct("<QII3f3f4H3f3fIB3x")
 
 CSV_FIELDS = [
-    "cycle",
-    "actual_start_s",
-    "input_us",
-    "control_us",
-    "output_us",
+    "timestamp_us",
+    "loop_dt_us",
     "exec_us",
-    "missed_cycles",
     "accel_x",
     "accel_y",
     "accel_z",
     "gyro_x",
     "gyro_y",
     "gyro_z",
-    "motor_1",
-    "motor_2",
-    "motor_3",
-    "motor_4",
     "pwm_1",
     "pwm_2",
     "pwm_3",
     "pwm_4",
-    "opti_x",
-    "opti_y",
-    "opti_z",
-    "opti_roll",
-    "opti_pitch",
-    "opti_yaw",
-    "opti_seq",
-    "opti_age_us",
-    "opti_valid",
+    "vision_x",
+    "vision_y",
+    "vision_z",
+    "vision_roll",
+    "vision_pitch",
+    "vision_yaw",
+    "vision_age_us",
+    "vision_valid",
 ]
 
 
@@ -99,36 +90,27 @@ def open_link(args: argparse.Namespace):
 
 def payload_to_row(values):
     return {
-        "cycle": values[1],
-        "actual_start_s": values[0],
-        "input_us": values[3],
-        "control_us": values[4],
-        "output_us": values[5],
+        "timestamp_us": values[0],
+        "loop_dt_us": values[1],
         "exec_us": values[2],
-        "missed_cycles": values[6],
-        "accel_x": values[7],
-        "accel_y": values[8],
-        "accel_z": values[9],
-        "gyro_x": values[10],
-        "gyro_y": values[11],
-        "gyro_z": values[12],
-        "motor_1": values[13],
-        "motor_2": values[14],
-        "motor_3": values[15],
-        "motor_4": values[16],
-        "pwm_1": values[17],
-        "pwm_2": values[18],
-        "pwm_3": values[19],
-        "pwm_4": values[20],
-        "opti_x": values[21],
-        "opti_y": values[22],
-        "opti_z": values[23],
-        "opti_roll": values[24],
-        "opti_pitch": values[25],
-        "opti_yaw": values[26],
-        "opti_seq": values[27],
-        "opti_age_us": values[28],
-        "opti_valid": values[29],
+        "accel_x": values[3],
+        "accel_y": values[4],
+        "accel_z": values[5],
+        "gyro_x": values[6],
+        "gyro_y": values[7],
+        "gyro_z": values[8],
+        "pwm_1": values[9],
+        "pwm_2": values[10],
+        "pwm_3": values[11],
+        "pwm_4": values[12],
+        "vision_x": values[13],
+        "vision_y": values[14],
+        "vision_z": values[15],
+        "vision_roll": values[16],
+        "vision_pitch": values[17],
+        "vision_yaw": values[18],
+        "vision_age_us": values[19],
+        "vision_valid": values[20],
     }
 
 
@@ -196,7 +178,7 @@ def main() -> int:
 
             if now - last_report >= 1.0:
                 print(
-                    f"rows={rows_written} last_cycle={row['cycle']} last_exec_us={row['exec_us']}",
+                    f"rows={rows_written} last_timestamp_us={row['timestamp_us']} last_exec_us={row['exec_us']}",
                     file=sys.stderr,
                 )
                 last_report = now
